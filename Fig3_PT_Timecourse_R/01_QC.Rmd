@@ -155,7 +155,9 @@ for(sample_iterate in 1:length(samples)){
 }
 
 ```
-#Add special metadata for cKOs (9-12) - see NEC127 mouse list for genotyping details
+#Add special metadata for cKOs (9-12)
+#NOTE - multiple genotypes pooled in single sample, separate by sex
+#NOTE - these samples NOT ANALYZED in publication (low yield, imperfect genotype segregation)
 ```{r}
 sobject = sobject_list[[9]]
 genotype = sobject$sex
