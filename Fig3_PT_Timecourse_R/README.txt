@@ -1,3 +1,15 @@
+Fibroblast cluster correspondence (code uses working names based on representative DEG):
+	*working name* = *figure name*
+	Prolif = Prolif
+	Fn1 = Myofibroblast
+	Cd80 = Lymphocyte interactive
+	Ghr = Late myofibroblast
+	Lama1 = Pial
+	Ptgds = Arachnoid
+	Tmeff2 = altered dural
+
+---------------------------------------------------------------------------------------------
+
 .Rmd files contain references to Seurat objects by number and iteration name, referring to various stages of analysis, described below. When not explicitly referenced, Seurat object used corresponds to most recently created or loaded Seurat object.
 
 
