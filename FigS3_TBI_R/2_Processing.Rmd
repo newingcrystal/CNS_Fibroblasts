@@ -415,94 +415,6 @@ sobject <- NormalizeData(sobject)
 sobject <- ScaleData(sobject)
 ```
 
-#=====================================***DID NOT PERFORM BELOW***=====================================
-*Heatmap*
-
-First calculate DE genes for every cluster
-```{r,results = "hide",eval = FALSE}
-Idents(sobject) = column
-#Note - performed twice, once on non-normalized and subsequently on normalized (both times using "RNA" slot, i.e. not scaled [even though scaled, above])
-markers_all <- FindAllMarkers(
-    object = sobject,
-    assay = "RNA",  ##Edited to do DEG analysis on RNA counts, not SCT transformed data
-    features = rownames(sobject),
-    test.use = "MAST",
-    only.pos = FALSE, 
-    min.pct = 0.05, 
-    logfc.threshold = 0.2
-)
-write.csv(markers_all,file = file.path(dir,"Spreadsheets",paste0(project, "_", iterationname, "_all_markers.csv")))
-```
-#=====================================***DID NOT PERFORM BELOW***=====================================
-Make the heatmap
-```{r}
-#read in a de gene file
-
-#performed on Presidio, then resaved with new iterrationname
-iterationname_old = "processed"
-markers = read.csv(file.path(dir,"Spreadsheets",paste0(project, "_", iterationname_old, "_all_markers.csv")),stringsAsFactors = F)
-
-#Select only the genes that pass thresholds
-markers = markers[markers$p_val_adj<pval,]
-
-#pick only positives, or restrict by min/max pct expression using pct1/2
-markers = markers[markers$avg_log2FC > lfc,] #make log2FC >0.2 for heatmaps, >0 for volcano plots
-markers = markers[markers$pct.1 > minpct & markers$pct.2 < maxpct,]
-
-#If you want, select markers that define a single cluster
-if (single){markers <- markers[markers$gene %in% names(table(markers$gene))[table(markers$gene) == 1],] }
-
-table(markers$cluster)
-
-topgenes <- markers %>% group_by(cluster) %>% top_n(10, avg_log2FC) #top 10 genes
-topgenes = topgenes[order(topgenes$cluster),]
-
-#Subset each cluster to ncells
-cellnames = sobject@meta.data[,column]
-names(cellnames) = colnames(sobject)
-clusters = levels(as.factor(cellnames))
-newcellnames = NULL
-for (cluster in clusters){
-  n = length(cellnames[cellnames == cluster])
-  if (n > ncells){n = ncells}
-  newcluster = sample(cellnames[cellnames == cluster],n, replace = F)
-  newcellnames = c(newcellnames,newcluster)
-}
-
-#check
-table(newcellnames)
-
-#Make heatmap
-setEPS()
-postscript(file.path(dir,"Heatmaps", paste0(project,"_",iterationname, "_", column,"_",pval,"_ncells",ncells,"heatmap.eps")))
-DoHeatmap(
-    object = sobject, 
-    features = c(topgenes$gene),
-    cells = names(newcellnames),
-    group.by = column,
-    size = 4,
-    label = T,
-    draw.lines = T,
-    raster = FALSE
-) + theme(axis.text.y = element_text(size = 2))
-
-dev.off()
-```
-#=====================================***DID NOT PERFORM BELOW***=====================================
-Print heatmap to console
-
-```{r}
-DoHeatmap(
-    object = sobject, 
-    features = c(topgenes$gene),
-    cells = names(newcellnames),
-    group.by = column,
-    size = 5,
-    label = T,
-    draw.lines = T
-)
-```
-
 Subset the data if necessary; will only run if "keep" includes some celltype
 
 Subset the data to include only your cells of interest: 
@@ -574,28 +486,6 @@ DimPlot(sobject.sub.fib, split.by = "condition")
 DefaultAssay(sobject.sub.fib) = "RNA"
 ```
 
-```{r}
-Plotfolder = "Plots/Fibroblast Subset"
-name = paste0(project,"_",iterationname)
-genes = c("COL1A2", "CTHRC1", "ACTA2", "CXCL12", "FAP", "IL33", "FN1")
-groups = c("timepoint", "condition", "sampleid", "seurat_clusters")
-genes = genes[genes %in% rownames(GetAssayData(sobject.sub.fib,slot = "data"))]
-
-for(feature in genes){
-  PrintSeuratGraph(sobject.sub.fib, namecard = name,graphtype = "feature",feature = feature)
-}
-
-#dim plots for clustering
-for(group in groups){
-  PrintSeuratGraph(sobject.sub.fib, namecard = name,graphtype = "dim",group = group, feature = group)
-}
-
-#violin plots
-for(feature in c(genes)){
-  PrintSeuratGraph(sobject.sub.fib, namecard = name,graphtype = "violin",feature = feature,group = "seurat_clusters")
-}
-```
-
 First calculate DE genes for every cluster
 ```{r,results = "hide",eval = FALSE}
 Idents(sobject.sub.fib) = column
@@ -611,72 +501,6 @@ markers_all <- FindAllMarkers(
 write.csv(markers_all,file = file.path(dir,"Spreadsheets",paste0(project, "_", iterationname, "_all_markers.csv")))
 ```
 
-Make the heatmap
-```{r}
-#read in a de gene file
-markers = read.csv(file.path(dir,"Spreadsheets",paste0(project, "_", iterationname, "_all_markers.csv")),stringsAsFactors = F)
-
-#Select only the genes that pass thresholds
-markers = markers[markers$p_val_adj<pval,]
-
-#pick only positives, or restrict by min/max pct expression using pct1/2
-markers = markers[markers$avg_log2FC > lfc,] #make log2FC >0.2 for heatmaps, >0 for volcano plots
-markers = markers[markers$pct.1 > minpct & markers$pct.2 < maxpct,]
-
-#If you want, select markers that define a single cluster
-if (single){markers <- markers[markers$gene %in% names(table(markers$gene))[table(markers$gene) == 1],] }
-
-table(markers$cluster)
-
-topgenes <- markers %>% group_by(cluster) %>% top_n(10, avg_log2FC) #top 10 genes
-topgenes = topgenes[order(topgenes$cluster),]
-
-#Subset each cluster to ncells
-cellnames = sobject.sub.fib@meta.data[,column]
-names(cellnames) = colnames(sobject.sub.fib)
-clusters = levels(as.factor(cellnames))
-newcellnames = NULL
-for (cluster in clusters){
-  n = length(cellnames[cellnames == cluster])
-  if (n > ncells){n = ncells}
-  newcluster = sample(cellnames[cellnames == cluster],n, replace = F)
-  newcellnames = c(newcellnames,newcluster)
-}
-
-#check
-table(newcellnames)
-
-#Make heatmap
-setEPS()
-postscript(file.path(dir,"Heatmaps", paste0(project,"_",iterationname, "_", column,"_",pval,"_ncells",ncells,"heatmap.eps")))
-DoHeatmap(
-    object = sobject.sub.fib, 
-    features = c(topgenes$gene),
-    cells = names(newcellnames),
-    group.by = column,
-    size = 4,
-    label = T,
-    draw.lines = T,
-    raster = FALSE
-) + theme(axis.text.y = element_text(size = 4))
-
-dev.off()
-```
-
-Print heatmap to console
-
-```{r}
-DoHeatmap(
-    object = sobject.sub.fib, 
-    features = c(topgenes$gene),
-    cells = names(newcellnames),
-    group.by = column,
-    size = 5,
-    label = T,
-    draw.lines = T
-)
-```
-
 #Next, do TBI vs. rest
 ```{r}
 Plotfolder = "Plots/Fibroblast Subset/Volcano"
@@ -687,74 +511,6 @@ markers = FindMarkers(
     ident.2 = "Control")
   
  write.csv(markers,file = file.path(dir,"Spreadsheets",paste0(project, "_", iterationname, "TBI_vs_rest.csv")))
-  
-  #volcano plot
-  
-#Minimum fold change (i.e. 1.15 = 15% increase)
-minfc = 1.15
-#Max adj. p value
-alpha = 0.05
-#Genes to highlight
-ngenes = 50
-
- defile = paste0(project, "_", iterationname, "TBI_vs_rest.csv")
-  
-#Comparison being made (must match file names)
-comparison = paste0(project, "_", iterationname, "TBI_vs_rest")
-
-newlist=list(de)
-de = read.csv(file.path(dir,"Spreadsheets", defile),stringsAsFactors = F) #any   spreadsheet with gene symbols or other identifiers
-colnames(de)[1] = "Gene"
-
-#NOTE: generated from "DEG_analysis" script
-fc = de
-fc = fc[!is.na(fc$avg_log2FC),]
-colorkeysdown = fc$Gene[fc$avg_log2FC < -log2(minfc) & fc$p_val_adj < alpha]
-colorkeysup = fc$Gene[fc$avg_log2FC > log2(minfc) & fc$p_val_adj < alpha]
-  
-#Either highlight specific genes or pick the top genes in colorkeysup/down
-top = fc[fc$p_val_adj<alpha,]
-top = top[order(top$avg_log2FC),"Gene"]
-highlight_top = c(head(top,ngenes),tail(top,ngenes))
-size_labels = c(2)
-
-allcolors = rep("darkgrey",length(fc$Gene))
-names(allcolors) = fc$Gene
-allcolors[names(allcolors) %in% colorkeysdown] = "red"
-allcolors[names(allcolors) %in% colorkeysup]= "blue"
-# names(allcolors)[allcolors == "yellow"] = "labelled"
-names(allcolors)[allcolors == "blue"] = "Late (21dpi)"
-names(allcolors)[allcolors == "darkgrey"] = "-"
-names(allcolors)[allcolors == "red"] = "Early (7dpi)"
-    
-#manual label
-name = paste0("Fibroblasts: TBI vs. Rest")
-range = max(max(fc$avg_log2FC), min(fc$avg_log2FC))
-if(is.infinite(range)){range = 150}
-
-setEPS()
-postscript(file.path(dir, Plotfolder, paste0("Volcano_rest_vs_tbi.eps")))
-print(EnhancedVolcano(fc,
-                lab = fc$Gene,
-                x = 'avg_log2FC',
-                y = 'p_val_adj',
-                xlim = c(-range, range),
-                title = name,
-                drawConnectors = T,
-                arrowheads = F,
-                legendPosition = 'bottom',
-                pCutoff = alpha,
-                FCcutoff = log2(minfc),
-                selectLab = highlight_top,
-                labSize = size_labels,
-                pointSize = 0.5,
-                col=c('black', 'black', 'black', 'red3'),
-                colCustom = allcolors,
-                gridlines.major = F,
-                gridlines.minor = F,
-                colAlpha = 1,
-                max.overlaps = 50))
-     dev.off()
 ```
 
 #Heatmap with fibrosis-related genes

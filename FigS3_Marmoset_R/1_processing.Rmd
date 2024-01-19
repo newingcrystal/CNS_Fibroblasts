@@ -172,6 +172,7 @@ markers12 = FindMarkers(
 write.csv(markers12, 
            "../Tables/cluster12.csv")
 ```
+
 ```{r}
 #Subcluster #18
 
@@ -197,6 +198,7 @@ DimPlot(sub18, reduction = "umap", label = TRUE, label.size = 6)
 name = "astrocyte-strokev1_sub18_"
 PrintSeuratGraph(namecard = name, seurat_object = sub18, graphtype = "feature", feature = "COL1A1")
 ```
+
 ```{r}
 #Default assay is already RNA
 markers_fibroblast_subsets = FindAllMarkers(
