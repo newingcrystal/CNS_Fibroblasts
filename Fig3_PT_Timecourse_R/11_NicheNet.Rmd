@@ -1,0 +1,358 @@
+---
+title: "14_niche_net"
+output: html_document
+date: "2023-06-04"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# BiocManager::install("ComplexHeatmap") 
+library(ComplexHeatmap) 
+# install.packages("devtools")
+# devtools::install_github("saeyslab/nichenetr")
+library(nichenetr)
+library(Seurat)
+library(tidyverse)
+library(dplyr)
+```
+
+```{r}
+#Specify your preferred directory for all input + output
+dir = "/Users/nathanewing-crystal/Dropbox (Ari Molofsky Lab)/Ari Molofsky Lab Team Folder/Nathan Ewing-Crystal/RNASeq/Lesion snRNASeq/seurat"
+
+#Specify exactly where your matrix files/raw data live
+datafolder = "Data/Seurat"
+Plotfolder = "Plots/NicheNet"
+project<-"lesion_snRNASeq"
+#load object: use #10 lesion_snRNASeq_final_astro.RData (astrotype, immunetype, fibtype, doublets removed)
+#OR load #12 final_fib-immune-astro-subset; if load this object, can skip below chunk
+load(file.choose())
+```
+
+#SKIP IF LOADED #12 (see above)
+#Integrate fibtype, astrotype, and immunetype into "celltype_subset" metadata
+```{r}
+celltype = as.character(sobject$celltype)
+names(celltype) = as.character(colnames(sobject))
+celltype_old = levels(as.factor(celltype))
+
+celltypecluster = as.character(sobject$celltypecluster)
+names(celltypecluster) = as.character(colnames(sobject))
+
+astrotype = as.character(sobject$astrotype)
+names(astrotype) = as.character(colnames(sobject))
+
+astrotypecluster = as.character(sobject$astrotypecluster)
+names(astrotypecluster) = as.character(colnames(sobject))
+
+immunetype = as.character(sobject$immunetype)
+names(immunetype) = as.character(colnames(sobject))
+
+immunetypecluster = as.character(sobject$immunetypecluster)
+names(immunetypecluster) = as.character(colnames(sobject))
+
+fibtype = as.character(sobject$fibtype)
+names(fibtype) = as.character(colnames(sobject))
+
+fibtypecluster = as.character(sobject$fibtypecluster)
+names(fibtypecluster) = as.character(colnames(sobject))
+
+for(cell in names(celltype)){
+  if(!(fibtype[cell] %in% celltype_old)){   #if specific fibroblast name
+    #assign fibroblast label
+    celltype[cell] = fibtype[cell]
+    celltypecluster[cell] = fibtypecluster[cell]
+  } else if (!(astrotype[cell] %in% celltype_old)){   #if specific astrocyte name
+    #assign astrocyte label
+    celltype[cell] = astrotype[cell]
+    celltypecluster[cell] = astrotypecluster[cell]
+  } else if (!(immunetype[cell] %in% celltype_old)){   #if specific immune name
+    #assign immune label
+    celltype[cell] = immunetype[cell]
+    celltypecluster[cell] = immunetypecluster[cell]
+  }
+}
+
+sobject$celltype_subset = celltype
+sobject$celltype_subsetcluster = celltypecluster
+
+Idents(sobject) = "celltype_subset"
+
+iterationname = "final_fib-immune-astro-subset"
+
+save(sobject,file = file.path(dir,datafolder,paste0(project,"_",iterationname,".RData")))
+```
+
+```{r}
+Idents(sobject) = "genotype"
+sobject.wt = subset(sobject, ident = "WT")
+```
+
+
+#Below code from NicheNet Seurat vignette
+```{r}
+options(timeout = 600000000) ### set this to avoid timeout error
+
+ligand_target_matrix = readRDS(url("https://zenodo.org/record/3260758/files/ligand_target_matrix.rds"))
+ligand_target_matrix[1:5,1:5] # target genes in rows, ligands in columns
+
+lr_network = readRDS(url("https://zenodo.org/record/3260758/files/lr_network.rds"))
+head(lr_network)
+
+weighted_networks = readRDS(url("https://zenodo.org/record/3260758/files/weighted_networks.rds"))
+weighted_networks_lr = weighted_networks$lr_sig %>% inner_join(lr_network %>% distinct(from,to), by = c("from","to"))
+
+head(weighted_networks$lr_sig) # interactions and their weights in the ligand-receptor + signaling 
+
+head(weighted_networks$gr) # interactions and their weights in the gene regulatory network
+
+lr_network = lr_network %>% mutate(from = convert_human_to_mouse_symbols(from), to = convert_human_to_mouse_symbols(to)) %>% drop_na()
+colnames(ligand_target_matrix) = ligand_target_matrix %>% colnames() %>% convert_human_to_mouse_symbols()
+rownames(ligand_target_matrix) = ligand_target_matrix %>% rownames() %>% convert_human_to_mouse_symbols()
+
+ligand_target_matrix = ligand_target_matrix %>% .[!is.na(rownames(ligand_target_matrix)), !is.na(colnames(ligand_target_matrix))]
+
+weighted_networks_lr = weighted_networks_lr %>% mutate(from = convert_human_to_mouse_symbols(from), to = convert_human_to_mouse_symbols(to)) %>% drop_na()
+```
+
+#below from step-by-step Seurat vignette https://github.com/saeyslab/nichenetr/blob/master/vignettes/seurat_steps.md
+
+resting --> 7dpi MYOfibroblasts, 2/7dpi sender (vs. 3g, no microanatomical restriction here)
+#WT corrected
+#USE FOR FIGURE
+```{r}
+graph1 = "rest_fib"
+graph2 = "7dpi_myofib"
+folder_name = paste0(graph1, "_to_", graph2, "_2_7dpi_sender")
+name_base = paste0("nichenet_from_",graph1,"_to_",graph2, "_2_7dpi_sender")
+
+PlotfolderOld = "Plots/NicheNet"
+newPlotfolder = file.path(PlotfolderOld, folder_name)
+Plotfolder_total = file.path(dir, newPlotfolder)
+if (!dir.exists(Plotfolder_total)){
+  print(paste0("Making new Plotfolder: ", newPlotfolder))
+  dir.create(Plotfolder_total, recursive=TRUE)
+}
+Plotfolder = newPlotfolder
+#---------1----------
+seuratObj = sobject.wt #for Vignette compatibility
+Idents(seuratObj) = "celltype_subset"
+
+#Receiver = all fibroblasts
+receiver = levels(seuratObj)[grep("Fibroblast", levels(seuratObj))]
+expressed_genes_receiver = get_expressed_genes(receiver, seuratObj, pct = 0.10)
+
+background_expressed_genes = expressed_genes_receiver %>% .[. %in% rownames(ligand_target_matrix)]
+
+#no sender, but limit to 2/7dpi
+Idents(seuratObj) = "timepoint"
+seurat_obj_sender = subset(seuratObj, idents = c("Rest", "2dpi", "7dpi"))
+Idents(seurat_obj_sender) = "celltype"
+sender_celltypes = list(levels(seurat_obj_sender)) #for 3d only, had to make list
+
+#Modify below - make 5% instead of 10% cutoff
+list_expressed_genes_sender = sender_celltypes %>% unique() %>% lapply(get_expressed_genes, seurat_obj_sender, 0.05) # lapply to get the expressed genes of every sender cell type separately here
+expressed_genes_sender = list_expressed_genes_sender %>% unlist() %>% unique()
+sender_celltypes = unlist(sender_celltypes)
+
+#---------2----------
+#modified - comparing clusters, not conditions
+
+Idents(seuratObj) = "celltype_subset"
+seurat_obj_receiver= subset(seuratObj, idents = receiver)
+
+#combine 7dpi with myofib label
+seurat_obj_receiver = SetIdent(seurat_obj_receiver, value = seurat_obj_receiver[["timepoint"]])
+fib_7dpi = CellsByIdentities(seurat_obj_receiver, "7dpi")
+seurat_obj_receiver = SetIdent(seurat_obj_receiver, value = seurat_obj_receiver[["fibtype"]])
+myofib = CellsByIdentities(seurat_obj_receiver, "Fibroblast_Fn1")
+myofib_7dpi = intersect(fib_7dpi[["7dpi"]], myofib$Fibroblast_Fn1)
+new_timepoint = seurat_obj_receiver$timepoint
+new_timepoint[myofib_7dpi] = "7dpi_myofib"
+seurat_obj_receiver$timepoint = new_timepoint
+
+seurat_obj_receiver = SetIdent(seurat_obj_receiver, value = seurat_obj_receiver[["timepoint"]])
+condition_reference = "Rest" 
+condition_oi = "7dpi_myofib"
+
+DE_table_receiver = FindMarkers(object = seurat_obj_receiver, ident.1 = condition_oi, ident.2 = condition_reference, min.pct = 0.10) %>% rownames_to_column("gene")
+
+#modified below - removed "abs" from abs(avg_log2FC)
+geneset_oi = DE_table_receiver %>% filter(p_val_adj <= 0.05 & avg_log2FC >= 0.25) %>% pull(gene)
+geneset_oi = geneset_oi %>% .[. %in% rownames(ligand_target_matrix)]
+
+#---------3----------
+ligands = lr_network %>% pull(from) %>% unique()
+receptors = lr_network %>% pull(to) %>% unique()
+
+expressed_ligands = intersect(ligands,expressed_genes_sender)
+expressed_receptors = intersect(receptors,expressed_genes_receiver)
+
+potential_ligands = lr_network %>% filter(from %in% expressed_ligands & to %in% expressed_receptors) %>% pull(from) %>% unique()
+
+#---------4----------
+ligand_activities = predict_ligand_activities(geneset = geneset_oi, background_expressed_genes = background_expressed_genes, ligand_target_matrix = ligand_target_matrix, potential_ligands = potential_ligands)
+
+best_upstream_ligands = ligand_activities %>% top_n(25, pearson) %>% arrange(-pearson) %>% pull(test_ligand) %>% unique()
+
+DotPlot(seuratObj, features = best_upstream_ligands %>% rev(), cols = "RdYlBu") + RotatedAxis()
+
+#---------5----------
+active_ligand_target_links_df = best_upstream_ligands %>% lapply(get_weighted_ligand_target_links,geneset = geneset_oi, ligand_target_matrix = ligand_target_matrix, n = 100) %>% bind_rows() %>% drop_na() 
+#3h only: change n from 200 to 100 (above)
+#3h only: order by weight for visualization
+active_ligand_target_links_df = active_ligand_target_links_df[order(active_ligand_target_links_df$weight, decreasing = F),]
+
+active_ligand_target_links = prepare_ligand_target_visualization(ligand_target_df = active_ligand_target_links_df, ligand_target_matrix = ligand_target_matrix, cutoff = 0.33)
+
+order_ligands = intersect(best_upstream_ligands, colnames(active_ligand_target_links)) %>% make.names()
+
+order_targets = active_ligand_target_links_df$target %>% unique() %>% intersect(rownames(active_ligand_target_links)) %>% make.names()
+rownames(active_ligand_target_links) = rownames(active_ligand_target_links) %>% make.names() # make.names() for heatmap visualization of genes like H2-T23
+colnames(active_ligand_target_links) = colnames(active_ligand_target_links) %>% make.names() # make.names() for heatmap visualization of genes like H2-T23
+
+vis_ligand_target = active_ligand_target_links[order_targets,order_ligands] %>% t()
+#remove 21st row
+vis_ligand_target = vis_ligand_target[-21,]
+
+p_ligand_target_network = t(vis_ligand_target) %>% make_heatmap_ggplot("Predicted target genes", "Prioritized ligands", color = "purple",legend_position = "top", x_axis_position = "top",legend_title = "Regulatory potential")  + theme(axis.text.x = element_text(face = "italic")) + scale_fill_gradient2(low = "whitesmoke",  high = "purple") + theme(axis.text = element_text(size = 8))
+
+name = paste0(name_base, "_target.eps")
+setEPS()
+postscript(file.path(dir, Plotfolder, name), width = 4, height = 6.75)
+p_ligand_target_network
+dev.off()
+#for figure
+name = paste0(name_base, "_target_LEGEND.eps")
+setEPS()
+postscript(file.path(dir, Plotfolder, name), width = 8, height = 6)
+p_ligand_target_network + theme(legend.text = element_text(size = 7))
+dev.off()
+
+#---------6----------
+lr_network_top = lr_network %>% filter(from %in% best_upstream_ligands & to %in% expressed_receptors) %>% distinct(from,to)
+best_upstream_receptors = lr_network_top %>% pull(to) %>% unique()
+
+lr_network_top_df_large = weighted_networks_lr %>% filter(from %in% best_upstream_ligands & to %in% best_upstream_receptors)
+
+lr_network_top_df = lr_network_top_df_large %>% spread("from","weight",fill = 0)
+lr_network_top_matrix = lr_network_top_df %>% select(-to) %>% as.matrix() %>% magrittr::set_rownames(lr_network_top_df$to)
+
+dist_receptors = dist(lr_network_top_matrix, method = "binary")
+hclust_receptors = hclust(dist_receptors, method = "ward.D2")
+order_receptors = hclust_receptors$labels[hclust_receptors$order]
+    
+dist_ligands = dist(lr_network_top_matrix %>% t(), method = "binary")
+hclust_ligands = hclust(dist_ligands, method = "ward.D2")
+order_ligands_receptor = hclust_ligands$labels[hclust_ligands$order]
+
+order_receptors = order_receptors %>% intersect(rownames(lr_network_top_matrix))
+order_ligands_receptor = order_ligands_receptor %>% intersect(colnames(lr_network_top_matrix))
+
+vis_ligand_receptor_network = lr_network_top_matrix[order_receptors, order_ligands_receptor]
+rownames(vis_ligand_receptor_network) = order_receptors %>% make.names()
+colnames(vis_ligand_receptor_network) = order_ligands_receptor %>% make.names()
+
+p_ligand_receptor_network = vis_ligand_receptor_network %>% t() %>% make_heatmap_ggplot("Ligands","Receptors", color = "mediumvioletred", x_axis_position = "top",legend_title = "Prior interaction potential")
+
+name = paste0(name_base, "_receptor.eps")
+setEPS()
+postscript(file.path(dir, Plotfolder, name))
+p_ligand_receptor_network
+dev.off()
+
+#---------7----------
+lr_network_strict = lr_network %>% filter(database != "ppi_prediction_go" & database != "ppi_prediction")
+ligands_bona_fide = lr_network_strict %>% pull(from) %>% unique()
+receptors_bona_fide = lr_network_strict %>% pull(to) %>% unique()
+
+lr_network_top_df_large_strict = lr_network_top_df_large %>% distinct(from,to) %>% inner_join(lr_network_strict, by = c("from","to")) %>% distinct(from,to)
+lr_network_top_df_large_strict = lr_network_top_df_large_strict %>% inner_join(lr_network_top_df_large, by = c("from","to"))
+
+lr_network_top_df_strict = lr_network_top_df_large_strict %>% spread("from","weight",fill = 0)
+lr_network_top_matrix_strict = lr_network_top_df_strict %>% select(-to) %>% as.matrix() %>% magrittr::set_rownames(lr_network_top_df_strict$to)
+
+dist_receptors = dist(lr_network_top_matrix_strict, method = "binary")
+hclust_receptors = hclust(dist_receptors, method = "ward.D2")
+order_receptors = hclust_receptors$labels[hclust_receptors$order]
+
+dist_ligands = dist(lr_network_top_matrix_strict %>% t(), method = "binary")
+hclust_ligands = hclust(dist_ligands, method = "ward.D2")
+order_ligands_receptor = hclust_ligands$labels[hclust_ligands$order]
+
+order_receptors = order_receptors %>% intersect(rownames(lr_network_top_matrix_strict))
+order_ligands_receptor = order_ligands_receptor %>% intersect(colnames(lr_network_top_matrix_strict)) %>% rev() #reverse for plotting - higihest first
+
+vis_ligand_receptor_network_strict = lr_network_top_matrix_strict[order_receptors, order_ligands_receptor]
+rownames(vis_ligand_receptor_network_strict) = order_receptors %>% make.names()
+colnames(vis_ligand_receptor_network_strict) = order_ligands_receptor %>% make.names()
+p_ligand_receptor_network_strict = vis_ligand_receptor_network_strict %>% t() %>% make_heatmap_ggplot("Ligands","Receptors", color = "mediumvioletred", x_axis_position = "top",legend_title = "Prior interaction potential\n(bona fide)")
+
+name = paste0(name_base, "_bonafide.eps")
+setEPS()
+postscript(file.path(dir, Plotfolder, name), width = 5, height = 5)
+p_ligand_receptor_network_strict + theme(axis.text = element_text(size = 10))
+dev.off()
+
+#-----------COMBINED------------
+
+Idents(seuratObj) = "celltype"
+
+# ligand activity heatmap
+ligand_pearson_matrix = ligand_activities %>% select(pearson) %>% as.matrix() %>% magrittr::set_rownames(ligand_activities$test_ligand)
+
+rownames(ligand_pearson_matrix) = rownames(ligand_pearson_matrix) %>% make.names()
+colnames(ligand_pearson_matrix) = colnames(ligand_pearson_matrix) %>% make.names()
+
+#3h only - reverse order again (was reversed for plotting for figure)
+order_ligands = rev(order_ligands)
+
+vis_ligand_pearson = ligand_pearson_matrix[order_ligands, ] %>% as.matrix(ncol = 1) %>% magrittr::set_colnames("Pearson")
+#3h only - x_axis = FALSE
+p_ligand_pearson = vis_ligand_pearson %>% make_heatmap_ggplot("Prioritized ligands","Ligand activity", color = "darkorange",legend_position = "top", x_axis_position = "top", legend_title = "Pearson correlation coefficient\n(target gene prediction ability)", x_axis = FALSE) + theme(legend.text = element_text(size = 6))
+# ligand expression Seurat dotplot
+order_ligands_adapted = order_ligands
+order_ligands_adapted[order_ligands_adapted == "H2.M3"] = "H2-M3" # cf required use of make.names for heatmap visualization | this is not necessary if these ligands are not in the list of prioritized ligands!
+order_ligands_adapted[order_ligands_adapted == "H2.T23"] = "H2-T23" # cf required use of make.names for heatmap visualization | this is not necessary if these ligands are not in the list of prioritized ligands!
+rotated_dotplot = DotPlot(seuratObj %>% subset(celltype %in% sender_celltypes), features = order_ligands_adapted, cols = "RdYlBu") + coord_flip() + theme(legend.text = element_text(size = 10), legend.title = element_text(size = 12)) # flip of coordinates necessary because we want to show ligands in the rows when combining all plots
+figures_without_legend = cowplot::plot_grid(
+  p_ligand_pearson + theme(legend.position = "none", axis.ticks = element_blank()), # + theme(axis.title.x = element_text()),
+  rotated_dotplot + theme(legend.position = "none", axis.ticks = element_blank(), axis.title.x = element_text(size = 12), axis.text.y = element_text(face = "italic", size = 9), axis.text.x = element_text(size = 9,  angle = 90,hjust = 0)) + ylab("Expression in Sender") + xlab("") + scale_y_discrete(position = "right"),
+  p_ligand_target_network + theme(legend.position = "none", axis.ticks = element_blank()) + ylab(""),
+  align = "hv",
+  nrow = 1)
+
+legends = cowplot::plot_grid(
+    ggpubr::as_ggplot(ggpubr::get_legend(p_ligand_pearson)),
+    ggpubr::as_ggplot(ggpubr::get_legend(rotated_dotplot)),
+    ggpubr::as_ggplot(ggpubr::get_legend(p_ligand_target_network)),
+    nrow = 1,
+    align = "h", rel_widths = c(1.5, 1, 1))
+
+combined_plot = cowplot::plot_grid(figures_without_legend, legends, rel_heights = c(10,5), nrow = 2, align = "hv")
+
+name = paste0(name_base, "_combined.eps")
+setEPS()
+postscript(file.path(dir, Plotfolder, name), width=12)
+combined_plot
+dev.off()
+
+#print individually - for figure
+setEPS()
+postscript(file.path(dir, Plotfolder, "pearson_LEGEND.eps"))
+p_ligand_pearson + theme(legend.text = element_text(size = 6)) + theme(legend.title = element_text(size = 8))
+dev.off()
+setEPS()
+postscript(file.path(dir, Plotfolder, "pearson.eps"), width = 3)
+p_ligand_pearson + theme(axis.text = element_text(size = 15)) + theme(axis.title.y = element_text(size = 18))
+dev.off()
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "dotplot.eps"), width = 10)
+rotated_dotplot + RotatedAxis()
+dev.off()
+```
+

@@ -109,23 +109,6 @@ sobject = subset(sobject, idents = remove_np)
 ```
 
 ```{r}
-anchors <- FindTransferAnchors(reference = sobject, query = vobj.merge.sub10, normalization.method = "SCT", reference.assay = "SCT", query.assay = "SCT")
-predictions.assay <- TransferData(anchorset = anchors, refdata = sobject$fibtype, prediction.assay = TRUE, dims = c(1:30), weight.reduction = vobj.merge.sub10[["pca"]])
-vobj.merge.sub10[["predictions_integrate"]] <- predictions.assay
-DefaultAssay(vobj.merge.sub10) <- "predictions_integrate"
-```
-
-```{r}
-image1 = "A.Rest.2dpi"
-image2 = "B.7dpi"
-image3 = "C.21dpi"
-
-#test
-SpatialFeaturePlot(vobj.merge.sub10, images = c(image1, image2, image3), features = "Fibroblast-Fn1")
-```
-
-
-```{r}
 #Extract snRNASeq counts to construct reference
 counts = sobject@assays$RNA@counts
 cell_types = as.factor(sobject$fibtype)

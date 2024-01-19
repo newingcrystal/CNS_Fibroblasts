@@ -97,13 +97,6 @@ sobject = subset(sobject, idents = remove)
 ```
 
 ```{r}
-anchors <- FindTransferAnchors(reference = sobject, query = vobj.merge.sub10, normalization.method = "SCT", reference.assay = "SCT", query.assay = "SCT")
-predictions.assay <- TransferData(anchorset = anchors, refdata = sobject$immunetype, prediction.assay = TRUE, dims = c(1:30), weight.reduction = vobj.merge.sub10[["pca"]])
-vobj.merge.sub10[["predictions_integrate"]] <- predictions.assay
-DefaultAssay(vobj.merge.sub10) <- "predictions_integrate"
-```
-
-```{r}
 image1 = "A.Rest.2dpi"
 image2 = "B.7dpi"
 image3 = "C.21dpi"

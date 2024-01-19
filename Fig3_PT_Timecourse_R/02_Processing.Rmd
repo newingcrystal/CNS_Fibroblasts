@@ -484,8 +484,6 @@ sobject <- ScaleData(sobject)
 ```
 
 
-*Heatmap*
-
 First calculate DE genes for every cluster
 ```{r,results = "hide",eval = FALSE}
 Idents(sobject) = column
@@ -500,75 +498,6 @@ markers_all <- FindAllMarkers(
     logfc.threshold = 0.2
 )
 write.csv(markers_all,file = file.path(dir,"Spreadsheets",paste0(project, "_", iterationname, "_all_markers.csv")))
-```
-
-Make the heatmap
-```{r}
-#read in a de gene file
-
-#performed on Presidio, then resaved with new iterrationname
-iterationname_old = "processed"
-markers = read.csv(file.path(dir,"Spreadsheets",paste0(project, "_", iterationname_old, "_all_markers.csv")),stringsAsFactors = F)
-
-#Select only the genes that pass thresholds
-markers = markers[markers$p_val_adj<pval,]
-
-#pick only positives, or restrict by min/max pct expression using pct1/2
-markers = markers[markers$avg_log2FC > lfc,] #make log2FC >0.2 for heatmaps, >0 for volcano plots
-markers = markers[markers$pct.1 > minpct & markers$pct.2 < maxpct,]
-
-#If you want, select markers that define a single cluster
-if (single){markers <- markers[markers$gene %in% names(table(markers$gene))[table(markers$gene) == 1],] }
-
-table(markers$cluster)
-
-topgenes <- markers %>% group_by(cluster) %>% top_n(10, avg_log2FC) #top 10 genes
-topgenes = topgenes[order(topgenes$cluster),]
-
-#Subset each cluster to ncells
-cellnames = sobject@meta.data[,column]
-names(cellnames) = colnames(sobject)
-clusters = levels(as.factor(cellnames))
-newcellnames = NULL
-for (cluster in clusters){
-  n = length(cellnames[cellnames == cluster])
-  if (n > ncells){n = ncells}
-  newcluster = sample(cellnames[cellnames == cluster],n, replace = F)
-  newcellnames = c(newcellnames,newcluster)
-}
-
-#check
-table(newcellnames)
-
-#Make heatmap
-setEPS()
-postscript(file.path(dir,"Heatmaps", paste0(project,"_",iterationname, "_", column,"_",pval,"_ncells",ncells,"heatmap.eps")))
-DoHeatmap(
-    object = sobject, 
-    features = c(topgenes$gene),
-    cells = names(newcellnames),
-    group.by = column,
-    size = 4,
-    label = T,
-    draw.lines = T,
-    raster = FALSE
-) + theme(axis.text.y = element_text(size = 2))
-
-dev.off()
-```
-
-Print heatmap to console
-
-```{r}
-DoHeatmap(
-    object = sobject, 
-    features = c(topgenes$gene),
-    cells = names(newcellnames),
-    group.by = column,
-    size = 5,
-    label = T,
-    draw.lines = T
-)
 ```
 
 Subset the data if necessary; will only run if "keep" includes some celltype
@@ -597,10 +526,10 @@ sobject.sub.astro = subset(sobject,subset = celltype %in% astrocyte_keep)
 save(sobject.sub.astro,file = file.path(dir,datafolder,paste0(project,"_",iterationname,"_astro.RData")))
 ```
 
-Repeat DEG with 12) final_fib-immune-astro-subset (doublets removed) AND WT only
+Repeat DEG with sobject 12) final_fib-immune-astro-subset (doublets removed) AND WT only
 Make dotplot
 
-NOTE: in later analysis, changed *back* to all genotypes (to reflect genes that determined clusters in the first place) - used code below, but changed to global marker list and from "sobject.wt" to "sobject" (still used sobject #12)
+NOTE: in later analysis, changed dotplot *back* to all genotypes (to reflect genes that determined clusters in the first place) - used code below, but changed to global marker list and from "sobject.wt" to "sobject" (still used sobject #12)
 
 First calculate DE genes for every cluster
 ```{r,results = "hide",eval = FALSE}

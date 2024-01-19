@@ -1,0 +1,105 @@
+---
+title: "Plots"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#install.packages("BiocManager")
+#BiocManager::install("Seurat")
+#BiocManager::install("ggplot2")
+#BiocManager::install("sctransform")
+
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+library(ape)
+library(cowplot)
+library(Matrix)
+library(EnhancedVolcano)
+library(knitr)
+library(readr)
+library(RColorBrewer)
+
+#Specify your preferred directory for all input + output
+dir = "/Users/nathanewing-crystal/Dropbox (Ari Molofsky Lab)/Ari Molofsky Lab Team Folder/Nathan Ewing-Crystal/RNASeq/Lesion snRNASeq/seurat"
+#Specify exactly where your seurat files live
+datafolder = "Data/Seurat"
+
+project<-"lesion_snRNASeq" 
+
+#seurat objects for barplots
+subsets = c("total", "fib", "immune")
+
+#set up folders
+Plotfolder = "Plots"
+
+load(file.choose())
+```
+
+Barplot for any two (or more) categories
+
+```{r}
+#Pick metadata columns
+clustercolumn = "celltype"
+samplecolumn = "timepoint_genotype"
+#pick a reasonable number of cells per sample to normalize by
+ncells = 2000 
+cols = brewer.pal(n = 6, name = "Dark2")
+cols.4 = brewer.pal(n=4, name = "Dark2")
+cols.3 = brewer.pal(n=3, name = "Dark2")
+cols.2 = c("#1B9E77", "#D95F02")
+
+#If you want to only compare particular samples/conditions, split further by another metadata column: 
+# split = NULL
+```
+
+```{r}
+# Below uses total sobject, with fib clusters added, cluster 7/10 removed, meninges removed, WT only
+# measure fibroblast subsets across timepoints as % of total cells
+sobject_sub = sobject
+clustercolumn = "fibtype"
+  
+  #Make a table and normalize
+  r = table(sobject_sub[[clustercolumn]][,1],sobject_sub[[samplecolumn]][,1])
+    
+    t = r  
+    #remove any clusters that don't have cells
+    t = t[rowSums(t)>0,]
+    
+    #normalize by sample
+    t = apply(t,MARGIN = 2,function(x)x/sum(x))
+    t = round(t*ncells,0)
+    
+    #convert to percents for each *sample*
+    t = apply(t,MARGIN = 2,function(x)x/sum(x))
+    t = round(t*100,2)
+    
+    #reorder (by timepoint)
+    tdf = as.data.frame(t)
+    tdf = tdf[,c("Rest WT", "2dpi WT", "7dpi WT", "21dpi WT")]
+    t = tdf
+    
+    clusters_to_keep = c("Fibroblast_Prolif", "Fibroblast_Fn1", "Fibroblast_Cd80", "Fibroblast_Ghr", "Fibroblast_Lama1", "Fibroblast_Ptgds", "Fibroblast_Tmeff2")
+    t = t[clusters_to_keep,]
+
+    name = paste0(project,"_", "_nomen_no710_fibtype", "_cluster-frequencies_of_total")
+    
+    setEPS()
+    postscript(file.path(dir,"Plots/Barplots",paste0(name,"barplot.eps")))
+    barplot(t(t), main="Sample composition by cluster",
+         ylab = "% of sample", col=cols.4,axisnames = T,
+          width = .2, cex.names = 0.7,axis.lty = 1, las=2, mgp=c(), beside=TRUE)
+    title(xlab = "Cluster", line = 4)
+    legend("topright", legend=rownames(t(t)), fill=cols.4, bg="white", inset=c(0.7, 0.0))
+    dev.off()
+  
+    print(barplot(t(t), main="Sample composition by cluster",
+         ylab = "% of sample", col=cols.4,axisnames = T,
+          width = .2, cex.names = 0.7,axis.lty = 1, las=2, mgp=c(), beside=TRUE))
+    title(xlab = "Cluster", line = 4)
+    legend("topright", legend=rownames(t(t)), fill=cols.4, bg="white", inset=c(0.7, 0.02))
+```
