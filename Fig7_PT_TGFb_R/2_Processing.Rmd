@@ -381,142 +381,6 @@ DefaultAssay(sobject) <- "RNA"
 sobject <- NormalizeData(sobject)
 sobject <- ScaleData(sobject)
 ```
-***OLD - moved to "OLD, WITH DOUBLETS" folder***
-Block to print multiple graphs: 
-```{r}
-Plotfolder = "Plots"
-name = paste0(project,"_",iterationname)
-genes = igenes
-features = m
-groups = c(dims, "celltype","celltypecluster", "condition", "timepoint", "sex")
-genes = genes[genes %in% rownames(GetAssayData(sobject,slot = "data"))]
-
-for(feature in genes){
-  PrintSeuratGraph(namecard = name,graphtype = "feature",feature = feature)
-}
-
-for(feature in features){
-  PrintSeuratGraph(namecard = name,graphtype = "feature",feature = feature)
-}
-
-#dim plots for clustering
-for(group in groups){
-  PrintSeuratGraph(namecard = name,graphtype = "dim",group = group, feature = group)
-  PrintSeuratGraph(namecard = paste0(name,"_labeled_"),graphtype = "dim",group = group, feature = group, label = TRUE)
-  PrintSeuratGraph(namecard = paste0(name, "_split"),graphtype = "dim",feature = group, split = group)
-
-}
-
-#celltype without legend
-graph = DimPlot(sobject, group.by = "celltype", label=TRUE) + ggplot2::theme(legend.position = "none")
-setEPS()
-postscript(file.path(dir,Plotfolder,"dimplot_nolegend.eps"))
-print(graph)
-dev.off()
-
-#violin plots
-for(feature in c(genes,features)){
-  PrintSeuratGraph(namecard = name,graphtype = "violin",feature = feature,group = "seurat_clusters")
-}
-```
-
-***OLD - moved to "OLD, WITH DOUBLETS" folder***
-
-*Heatmap*
-
-First calculate DE genes for every cluster
-```{r,results = "hide",eval = FALSE}
-Idents(sobject) = column
-#Note - performed twice, once on non-normalized and subsequently on normalized (both times using "RNA" slot, i.e. not scaled [even though scaled, above])
-
-# markers_all <- FindAllMarkers(
-#     object = sobject,
-#     assay = "RNA",  ##Edited to do DEG analysis on RNA counts, not SCT transformed data
-#     features = rownames(sobject),
-#     test.use = "MAST",
-#     only.pos = FALSE, 
-#     min.pct = 0.05, 
-#     logfc.threshold = 0.2
-# )
-
-#or
-
-markers_all <- RunPrestoAll(
-    object = sobject,
-    assay = "RNA",
-    features = rownames(sobject),
-    test.use = "wilcox",
-    only.pos = FALSE,
-    min.pct = 0.05,
-    logfc.threshold = 0.2)
-
-write.csv(markers_all,file = file.path(dir,"Spreadsheets",paste0(project, "_", iterationname, "_all_markers.csv")))
-```
-***OLD - moved to "OLD, WITH DOUBLETS" folder***
-
-Make the heatmap
-```{r}
-#read in a de gene file
-
-markers = read.csv(file.path(dir,"Spreadsheets",paste0(project, "_", iterationname, "_all_markers.csv")),stringsAsFactors = F)
-
-#Select only the genes that pass thresholds
-markers = markers[markers$p_val_adj<pval,]
-
-#pick only positives, or restrict by min/max pct expression using pct1/2
-markers = markers[markers$avg_log2FC > lfc,] #make log2FC >0.2 for heatmaps, >0 for volcano plots
-markers = markers[markers$pct.1 > minpct & markers$pct.2 < maxpct,]
-
-#If you want, select markers that define a single cluster
-if (single){markers <- markers[markers$gene %in% names(table(markers$gene))[table(markers$gene) == 1],] }
-
-table(markers$cluster)
-
-topgenes <- markers %>% group_by(cluster) %>% top_n(10, avg_log2FC) #top 10 genes
-topgenes = topgenes[order(topgenes$cluster),]
-
-#Subset each cluster to ncells
-cellnames = sobject@meta.data[,column]
-names(cellnames) = colnames(sobject)
-clusters = levels(as.factor(cellnames))
-newcellnames = NULL
-for (cluster in clusters){
-  n = length(cellnames[cellnames == cluster])
-  if (n > ncells){n = ncells}
-  newcluster = sample(cellnames[cellnames == cluster],n, replace = F)
-  newcellnames = c(newcellnames,newcluster)
-}
-
-#check
-table(newcellnames)
-
-#Make heatmap
-setEPS()
-postscript(file.path(dir,"Heatmaps", paste0(project,"_",iterationname, "_", column,"_",pval,"_ncells",ncells,"heatmap.eps")))
-DoHeatmap(
-    object = sobject, 
-    features = c(topgenes$gene),
-    cells = names(newcellnames),
-    group.by = column,
-    size = 4,
-    label = T,
-    draw.lines = T,
-    raster = FALSE
-) + theme(axis.text.y = element_text(size = 2))
-
-dev.off()
-
-#dotplot
-topgenes <- markers %>% group_by(cluster) %>% top_n(3, avg_log2FC) #top 10 genes
-topgenes = topgenes[order(topgenes$cluster),]
-
-Idents(sobject) = "celltype"
-setEPS()
-postscript(file.path(dir,"DotPlots", paste0(project,"_",iterationname,"_",pval,"_ncells",ncells,"dotplot.eps")), width = 15)
-#below can either be "sobject.wt" or "sobject"
-DotPlot(sobject, assay = "RNA", features = unique(c(topgenes$gene)), cols = "RdBu") + theme(axis.text.x = element_text(angle = 90, hjust = 0.95))
-dev.off()
-```
 
 Subset the data if necessary; will only run if "keep" includes some celltype
 
@@ -538,7 +402,7 @@ sobject.sub.t = subset(sobject, subset = celltype %in% t_keep)
 save(sobject.sub.t,file = file.path(dir,datafolder,paste0(project,"_",iterationname,"_t.RData")))
 ```
 
-********REDO WITHOUT DOUBLETS********
+********WITHOUT DOUBLETS********
 Note - removed doublets in "3_Fibroblast_subset.Rmd
 Here, use 4 (iterationname = "final_withfibtype", doublets removed)
 
@@ -582,8 +446,6 @@ for(feature in c(genes,features)){
 ```
 
 
-*Heatmap*
-
 First calculate DE genes for every cluster
 ```{r,results = "hide",eval = FALSE}
 Idents(sobject) = column
@@ -630,40 +492,6 @@ markers = markers[markers$pct.1 > minpct & markers$pct.2 < maxpct,]
 if (single){markers <- markers[markers$gene %in% names(table(markers$gene))[table(markers$gene) == 1],] }
 
 table(markers$cluster)
-
-topgenes <- markers %>% group_by(cluster) %>% top_n(10, avg_log2FC) #top 10 genes
-topgenes = topgenes[order(topgenes$cluster),]
-
-#Subset each cluster to ncells
-cellnames = sobject@meta.data[,column]
-names(cellnames) = colnames(sobject)
-clusters = levels(as.factor(cellnames))
-newcellnames = NULL
-for (cluster in clusters){
-  n = length(cellnames[cellnames == cluster])
-  if (n > ncells){n = ncells}
-  newcluster = sample(cellnames[cellnames == cluster],n, replace = F)
-  newcellnames = c(newcellnames,newcluster)
-}
-
-#check
-table(newcellnames)
-
-#Make heatmap
-setEPS()
-postscript(file.path(dir,"Heatmaps", paste0(project,"_",iterationname, "_", column,"_",pval,"_ncells",ncells,"heatmap.eps")))
-DoHeatmap(
-    object = sobject, 
-    features = c(topgenes$gene),
-    cells = names(newcellnames),
-    group.by = column,
-    size = 4,
-    label = T,
-    draw.lines = T,
-    raster = FALSE
-) + theme(axis.text.y = element_text(size = 2))
-
-dev.off()
 
 #dotplot
 topgenes <- markers %>% group_by(cluster) %>% top_n(3, avg_log2FC) #top 10 genes
