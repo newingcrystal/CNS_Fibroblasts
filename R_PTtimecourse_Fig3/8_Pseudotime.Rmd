@@ -1,0 +1,129 @@
+---
+title: "Pseudotime"
+author: "Nathan Ewing-Crystal"
+date: "2023-05-17"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(Seurat)
+
+#if (!requireNamespace("BiocManager", quietly = TRUE))
+#install.packages("BiocManager")
+#BiocManager::install(version = "3.16")
+
+#BiocManager::install(c('BiocGenerics', 'DelayedArray', 'DelayedMatrixStats',
+#                       'limma', 'lme4', 'S4Vectors', 'SingleCellExperiment',
+#                       'SummarizedExperiment', 'batchelor', 'HDF5Array',
+#                       'terra', 'ggrastr'))
+#install.packages("devtools")
+#devtools::install_github('cole-trapnell-lab/monocle3')
+library(monocle3)
+
+#install.packages("R.utils")
+#remotes::install_github("satijalab/seurat-wrappers")
+library(SeuratWrappers)
+
+library(ggplot2)
+library(patchwork)
+library(magrittr)
+install.packages("tidyverse")
+library(tidyverse)
+library(dplyr)
+install.packages('s2')
+library(s2)
+```
+
+```{r}
+#Load filtered seurat object (note - using sobject.sub.fib.v2)
+load(file.choose())
+```
+
+```{r}
+#Specify your preferred directory for all input + output
+dir = "/Users/nathanewing-crystal/Dropbox (Ari Molofsky Lab)/Ari Molofsky Lab Team Folder/Nathan Ewing-Crystal/RNASeq/Lesion snRNASeq/seurat"
+#Specify exactly where your seurat files live
+datafolder = "Data/Seurat/Fibroblast Subset"
+
+project<-"lesion_snRNASeq" 
+
+#set up folders
+Plotfolder = "Plots/Fibroblast Subset"
+
+#make a unique name; maybe this is the celltype you've already subset, or the age you're looking at, etc.
+iterationname = "fib_reclustered"
+```
+
+```{r}
+#Perform pseudotime analysis on lesion only (becomes complicated with meninges to choose "starting" node)
+Idents(sobject.sub.fib.v2) = "fibtype"
+clusters_to_keep = levels(Idents(sobject.sub.fib.v2))
+clusters_to_keep = clusters_to_keep[c(2:3, 5:7, 9, 12)]
+  sobject.sub.fib.v3 = subset(sobject.sub.fib.v2, idents=clusters_to_keep)
+
+
+monocle_object <- as.cell_data_set(sobject.sub.fib.v3)
+monocle_object <- cluster_cells(cds = monocle_object)
+p1 <- plot_cells(monocle_object, show_trajectory_graph = FALSE)
+p2 <- plot_cells(monocle_object, color_cells_by = "partition", show_trajectory_graph = FALSE)
+wrap_plots(p1, p2)
+
+monocle_object <- learn_graph(monocle_object, use_partition = TRUE)
+
+#choose max Pi16 as root
+#max.pi16 <- which.max(unlist(FetchData(sobject.sub.fib.v3, "Pi16")))
+#max.pi16 <- colnames(sobject.sub.fib.v3)[max.pi16]
+
+#monocle_object <- order_cells(monocle_object,reduction_method = "UMAP", root_cells = max.pi16)
+
+#choose myofibroblasts as root
+monocle_object <- order_cells(monocle_object,reduction_method = "UMAP")
+
+
+Plotfolder = "Plots/Fibroblast Subset/Pseudotime"
+name = paste0(project, "_", iterationname)
+
+setEPS()
+postscript(file.path(dir, Plotfolder, paste0(name, "_realtime.eps")))
+DimPlot(sobject.sub.fib.v3, group.by = "timepoint")
+dev.off()
+
+setEPS()
+postscript(file.path(dir, Plotfolder, paste0(name, "_pseudotime.eps")))
+plot_cells(monocle_object,
+       color_cells_by = "pseudotime",
+       graph_label_size=5,
+       show_trajectory_graph = FALSE,
+       label_leaves = FALSE, label_roots = FALSE, label_branch_points = FALSE)
+dev.off()
+
+setEPS()
+postscript(file.path(dir, Plotfolder, paste0(name, "_pseudotime_trajectory.eps")))
+plot_cells(monocle_object,
+       color_cells_by = "pseudotime",
+       graph_label_size=5,
+       show_trajectory_graph = TRUE,
+       label_leaves = FALSE, label_roots = FALSE, label_branch_points = FALSE)
+dev.off()
+
+setEPS()
+postscript(file.path(dir, Plotfolder, paste0(name, "_pseudotime_trajectory_labeled.eps")))
+plot_cells(monocle_object,
+       color_cells_by = "pseudotime",
+       graph_label_size=5,
+       show_trajectory_graph = TRUE)
+dev.off()
+
+deg <- graph_test(monocle_object, neighbor_graph = "principal_graph")
+deg_filtered = deg %>% arrange(desc(morans_I)) %>% filter(status == "OK")
+
+fData(monocle_object)$gene_short_name=rownames(fData(monocle_object))
+my_genes <- row.names(subset(fData(monocle_object), gene_short_name %in% c("Atp1a2", "Col1a2", "Ptgds", "Mki67", "Dpp4", "Igf1", "Cd80", "Il1r1", "Cthrc1"))) 
+cds_subset <- monocle_object[my_genes,]
+plot_genes_in_pseudotime(cds_subset, color_cells_by = "pseudotime" )
+```
+

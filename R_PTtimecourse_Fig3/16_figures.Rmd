@@ -1,0 +1,86 @@
+---
+title: "figure"
+output: html_document
+date: "2023-06-23"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+dir = "/Users/nathanewing-crystal/Dropbox (Ari Molofsky Lab)/Ari Molofsky Lab Team Folder/Nathan Ewing-Crystal/RNASeq/Lesion snRNASeq/seurat"
+project<-"lesion_snRNASeq"
+iterationname = "_figure_"
+```
+
+```{r}
+print_to_file = function(graph = p1, base_name = name){
+  Plotfolder = "Plots/figure"
+  name = paste0(project, iterationname, base_name, ".eps")
+  setEPS()
+  postscript(file.path(dir,Plotfolder,name))
+  print(p1)
+  dev.off()
+  
+  print(paste0("Saving: ", name))
+}
+```
+
+Function to print multiple graphs: 
+```{r}
+PrintSeuratGraph = function(seurat_object = NULL,graphtype = "feature",feature = NULL,group = NULL,split=NULL,cellnames=NULL, label=FALSE){
+  if (!is.null(cellnames)){
+    #Idents(seurat_object) = cellnames[1]
+    #cells = colnames(seurat_object)[Idents(seurat_object) %in% cellnames[1:length(cellnames)]]} 
+    cells = cellnames}
+  else {cells = cellnames}
+  if (graphtype == "feature"){
+    graph = FeaturePlot(seurat_object,features = feature,split.by = split, cells = cells,cols = c("lightyellow","darkred"))
+  }
+  if (graphtype == "violin"){
+    graph = VlnPlot(seurat_object,features = feature, pt.size = 0.1, idents = cellnames[2:length(cellnames)],group.by = group, split.by = split)
+  }
+  if (graphtype == "dim"){
+    graph = DimPlot(seurat_object,cells = cells, group.by = group, split.by = split, label = label)
+  }
+  return(graph)
+}
+```
+
+```{r}
+p1 = DimPlot(sobject, label=F) + NoLegend()
+name = "umap_nolegend"
+print_to_file()
+```
+```{r}
+p1 = DimPlot(sobject.sub.fib.v2, label=F) + NoLegend()
+name = "umap_fib_nolegend"
+print_to_file()
+```
+
+```{r}
+p1 = DimPlot(sobject.sub.fib.v2, group.by = "fibtype", label=T, label.size = 5, repel = T) + NoLegend()
+name = "umap_fib"
+print_to_file()
+```
+
+```{r}
+Idents(sobject.sub.fib.wt.all) = "timepoint"
+p1 = DimPlot(subset(sobject.sub.fib.wt.all, ident = "Rest"), group.by = "microanatomy", label=F) + NoLegend()
+name = "umap_fib_rest"
+print_to_file()
+p1 = DimPlot(subset(sobject.sub.fib.wt.all, ident = "Rest"), group.by = "microanatomy", label=F)
+name = "umap_fib_rest_LEGEND"
+print_to_file()
+```
+
+```{r}
+p1 = PrintSeuratGraph(sobject, graphtype = "feature", feature = "Col1a2")
+name = "Col1a2_feature"
+print_to_file()
+
+p1 = PrintSeuratGraph(sobject, graphtype = "feature", feature = "Col1a1")
+name = "Col1a1_feature"
+print_to_file()
+```

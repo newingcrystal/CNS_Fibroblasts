@@ -1,0 +1,389 @@
+---
+title: "Integrate"
+author: "Nathan Ewing-Crystal"
+date: "2023-05-23"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# install.packages("devtools")
+options(timeout = 600000000) ### set this to avoid timeout error
+#devtools::install_github("dmcable/spacexr", build_vignettes = FALSE)
+library(Seurat)
+library(spacexr)
+library(Matrix)
+library(ggplot2)
+library(gridExtra)
+library(RColorBrewer)
+library(ggpubr)
+library(plyr)
+```
+
+```{r}
+#Specify your preferred directory for all input + output
+dir = "/Users/nathanewing-crystal/Dropbox (Ari Molofsky Lab)/Ari Molofsky Lab Team Folder/Nathan Ewing-Crystal/RNASeq/Lesion snRNASeq/seurat"
+
+#Specify exactly where your matrix files/raw data live
+datafolder = "Data/Seurat"
+Plotfolder = "Plots"
+project<-"lesion_snRNASeq"
+#load snRNASeq, Visium objects
+load(file.choose())
+```
+
+#load "lesion_snRNASeq_final_fib_no710.RData" and proceed to below
+#After 10_immune_subset - transfer "immunetype" and "immunetypecluster" metadata
+```{r}
+celltype = as.character(sobject$celltype)
+names(celltype) = as.character(colnames(sobject))
+
+celltypecluster = as.character(sobject$celltypecluster)
+names(celltypecluster) = as.character(colnames(sobject))
+
+immunetype = as.character(sobject.sub.immune$immunetype)
+names(immunetype) = as.character(colnames(sobject.sub.immune))
+
+immunetypecluster = as.character(sobject.sub.immune$immunetypecluster)
+names(immunetypecluster) = as.character(colnames(sobject.sub.immune))
+
+for(cell in names(celltype)){
+  if(cell %in% names(immunetype)){
+      index_cell = which(names(celltype) == cell)
+      index_immune = which(names(immunetype) == cell)
+      celltype[index_cell] = immunetype[index_immune]
+      celltypecluster[index_cell] = immunetypecluster[index_immune]
+  }
+}
+
+sobject$immunetype = celltype
+sobject$immunetypecluster = celltypecluster
+
+Idents(sobject) = "immunetype"
+
+iterationname = "final_immune"
+
+save(sobject,file = file.path(dir,datafolder,paste0(project,"_",iterationname,".RData")))
+```
+
+#Next, exclude meninges - by cluster and microanatomy
+```{r}
+iterationname = "final_immune_nomen_wt"
+
+Idents(sobject) = "microanatomy"
+sobject.nomen = subset(sobject, idents = c("Lesion", "Parenchyma"))
+rm(sobject)
+
+Idents(sobject.nomen) = "genotype"
+sobject.nomen.wt = subset(sobject.nomen, idents = "WT")
+
+rm(sobject.nomen)
+save(sobject.nomen.wt,file = file.path(dir,datafolder,paste0(project,"_",iterationname,".RData")))
+```
+#optionally, load "sobject_final_immune_nomen_wt" 
+#for below code, use "sobject.nomen.wt", but called "sobject
+```{r}
+sobject = sobject.nomen.wt
+rm(sobject.nomen.wt)
+
+Idents(sobject) = "immunetype"
+#remove cluster xx if insufficient #'s for algorithm
+remove = levels(Idents(sobject))
+remove = remove[!(remove %in% c("DCs", "Osteoclasts", "Neural Progenitors"))]
+sobject = subset(sobject, idents = remove)
+```
+
+```{r}
+anchors <- FindTransferAnchors(reference = sobject, query = vobj.merge.sub10, normalization.method = "SCT", reference.assay = "SCT", query.assay = "SCT")
+predictions.assay <- TransferData(anchorset = anchors, refdata = sobject$immunetype, prediction.assay = TRUE, dims = c(1:30), weight.reduction = vobj.merge.sub10[["pca"]])
+vobj.merge.sub10[["predictions_integrate"]] <- predictions.assay
+DefaultAssay(vobj.merge.sub10) <- "predictions_integrate"
+```
+
+```{r}
+image1 = "A.Rest.2dpi"
+image2 = "B.7dpi"
+image3 = "C.21dpi"
+```
+
+
+```{r}
+#Extract snRNASeq counts to construct reference
+counts = sobject@assays$RNA@counts
+cell_types = as.factor(sobject$immunetype)
+
+# Create the Reference object
+reference <- Reference(counts, cell_types)
+print(dim(reference@counts)) #observe Digital Gene Expression matrix
+table(reference@cell_types) #number of occurences for each cell type
+
+datafolder_up = "Data"
+saveRDS(reference, file.path(dir, datafolder_up,'SCRef_immune.rds'))
+
+```
+
+```{r}
+coords1 = vobj.merge.sub10@images$A.Rest.2dpi@coordinates[,5:4]
+coords2 = vobj.merge.sub10@images$B.7dpi@coordinates[,5:4]
+coords3 = vobj.merge.sub10@images$C.21dpi@coordinates[,5:4]
+
+counts = vobj.merge.sub10@assays$Spatial@counts
+
+# Create SpatialRNA object
+puck1 <- SpatialRNA(coords1, counts)
+puck2 <- SpatialRNA(coords2, counts)
+puck3 <- SpatialRNA(coords3, counts)
+
+spatial.replicates <- list(puck1, puck2, puck3)
+replicate_names <- c('Rest.2dpi','7dpi','21dpi')
+rctd <- create.RCTD.replicates(spatial.replicates, reference, replicate_names, max_cores = 1)
+rctd <- run.RCTD.replicates(rctd, doublet_mode = 'full')
+saveRDS(rctd, file.path(dir, datafolder_up,'rctd_immune.rds'))
+
+# Create the output directory in your working directory
+resultsdir = file.path(dir, Plotfolder, "visium/Immune/")
+
+
+# Create variables from the myRCTD object to plot results
+barcodes1 = colnames(rctd@RCTD.reps[[1]]@spatialRNA@counts)
+barcodes2 = colnames(rctd@RCTD.reps[[2]]@spatialRNA@counts)
+barcodes3 = colnames(rctd@RCTD.reps[[3]]@spatialRNA@counts) # list of spatial barcodes
+barcodes = list(barcodes1, barcodes2, barcodes3)
+
+weights1 <- rctd@RCTD.reps[[1]]@results$weights
+weights2 <- rctd@RCTD.reps[[2]]@results$weights
+weights3 <- rctd@RCTD.reps[[3]]@results$weights # Weights for each cell type per barcode
+
+# Normalize per spot weights so cell type probabilities sum to 1 for each spot
+norm_weights1 <- normalize_weights(weights1) 
+norm_weights2 <- normalize_weights(weights2) 
+norm_weights3 <- normalize_weights(weights3) 
+norm_weights = list(norm_weights1, norm_weights2, norm_weights3)
+
+cell_type_names<-colnames(norm_weights1) # List of cell types [same for all 3]
+# For each spot barcode (row), you can see the normalized weight for each cell type (column)
+
+#note - different cell type names (dash instead of underscore) for integration
+cell_type_names_dash = rownames(vobj.merge.sub10@assays$predictions_integrate)
+
+# Plot cell type probabilities (normalized) per spot (red = 1, blue = 0 probability)
+# Different order in cell_type_names and cell_type_names_dash, but doesn't matter - save with correct filename
+for(i in 1:length(cell_type_names_dash)){
+    if(i > length(cell_type_names)){print(paste0("skip ", i))} else{
+    max1 = plyr::round_any(max(rctd@RCTD.reps[[1]]@results$weights[,cell_type_names[i]]), accuracy = 0.1, f = ceiling) #take maximum prediction, round up to nearest 0.1 (easier to view)
+    max2 = plyr::round_any(max(rctd@RCTD.reps[[2]]@results$weights[,cell_type_names[i]]), accuracy = 0.1, f = ceiling) #take maximum prediction, round up to nearest 0.1 (easier to view)
+    max3 = plyr::round_any(max(rctd@RCTD.reps[[3]]@results$weights[,cell_type_names[i]]), accuracy = 0.1, f = ceiling) #take maximum prediction, round up to nearest 0.1 (easier to view)
+    max = max(max1, max2, max3)
+    
+    j=1
+    p1 = plot_puck_continuous(rctd@RCTD.reps[[j]]@spatialRNA, 
+                       barcodes[[j]],
+                       norm_weights[[j]][,cell_type_names[i]],
+                       title =cell_type_names[i], 
+                       size=1,
+                       ylimit = c(0, max))
+    j=2
+    p2 = plot_puck_continuous(rctd@RCTD.reps[[j]]@spatialRNA, 
+                       barcodes[[j]],
+                       norm_weights[[j]][,cell_type_names[i]],
+                       title =cell_type_names[i], 
+                       size=1,
+                       ylimit = c(0, max))
+    j=3
+    p3 = plot_puck_continuous(rctd@RCTD.reps[[j]]@spatialRNA, 
+                       barcodes[[j]],
+                       norm_weights[[j]][,cell_type_names[i]],
+                       title =cell_type_names[i], 
+                       size=1,
+                       ylimit = c(0, max))
+    }
+    p4 = SpatialFeaturePlot(vobj.merge.sub10, images = c(image1, image2, image3), features = cell_type_names_dash[i])
+    
+    if(i > length(cell_type_names)){print(paste0("skip save ", i))} else{
+    setEPS()
+    postscript(file.path(resultsdir,paste0(cell_type_names[i], "_spacexr_deconv.eps")), width = 12)
+    print(grid.arrange(p1, p2, p3, ncol = 3))
+    dev.off()
+    }
+    
+    setEPS()
+    postscript(file.path(resultsdir,paste0(cell_type_names_dash[i], "_integration_prediction.eps")))
+    print(p4)
+    dev.off()
+}
+
+#now add back to Visium and plot
+
+#fill in image4
+rownames_image4 = colnames(vobj.merge.sub10)[vobj.merge.sub10$orig.ident == "21dpi Deleter"]
+empty_image4 = matrix(0, nrow = length(rownames_image4), ncol = length(cell_type_names))
+rownames(empty_image4) = rownames_image4
+colnames(empty_image4) = cell_type_names
+#fill in missing spots from 21dpi (unknown origin)
+normweights_seurat = rbind(norm_weights1, norm_weights2, norm_weights3, empty_image4)
+rownames_missing = colnames(vobj.merge.sub10)[(!(colnames(vobj.merge.sub10) %in% rownames(normweights_seurat)))]
+missing = matrix(0, nrow = length(rownames_missing), ncol = length(cell_type_names))
+rownames(missing) = rownames_missing
+colnames(missing) = cell_type_names
+#bind together
+normweights_seurat = rbind(norm_weights1, norm_weights2, norm_weights3, empty_image4, missing)
+normweights_seurat = as.matrix(t(normweights_seurat))
+
+vobj.merge.sub10[["celltype_spacexr_immune"]] <- CreateAssayObject(data = normweights_seurat)
+DefaultAssay(vobj.merge.sub10) = "celltype_spacexr_immune"
+Plotfolder = "Plots/visium/Immune/plot_visium"
+for(celltype in rownames(vobj.merge.sub10)){
+  
+  #EQUALIZE SCALE BETWEEN 3 SECTIONS
+  rng = range(FetchData(vobj.merge.sub10, vars = celltype)) #a range to have the same min and max for both plots
+
+  myPalette <- colorRampPalette(rev(brewer.pal(11, "Spectral")))
+  sc <- scale_fill_gradientn(colours = myPalette(100), limits = c(rng[1], rng[2]), breaks = c(0, round(max(rng)/2, digits = 2), round(max(rng), digits = 2)))
+  
+  p1 = SpatialFeaturePlot(vobj.merge.sub10, celltype, images = c(image1, image2, image3))
+  
+  setEPS()
+  postscript(file.path(dir, Plotfolder, paste0(celltype, "_spacexr_deconv_plot_visium.eps")))
+  print(p1[[1]] + sc + p1[[2]] + sc + p1[[3]] + sc)
+  dev.off()
+  
+  if(celltype %in% c("DAMs", "Macrophage-Ldlrad3")){
+    #for legend
+      sc <- scale_fill_gradientn(colours = myPalette(100), limits = c(rng[1], rng[2]), breaks = c(0, round(max(rng)/2, digits = 2), round_any(rng[2], 0.01, f = floor)))
+
+    setEPS()
+    postscript(file.path(dir, Plotfolder, paste0(celltype, "_spacexr_deconv_plot_visium-LEGEND.eps")), width = 12)
+    print(p1[[1]] + sc + p1[[2]] + sc + p1[[3]] + sc)
+    dev.off()
+  }
+}
+```
+
+#correlate SAM/DAM with myofibroblast
+```{r}
+spatial_fib = readRDS("/Users/nathanewing-crystal/Dropbox (Ari Molofsky Lab)/Ari Molofsky Lab Team Folder/Nathan Ewing-Crystal/RNASeq/Lesion snRNASeq/seurat/Data/rctd_fib.rds")
+spatial_immune = readRDS("/Users/nathanewing-crystal/Dropbox (Ari Molofsky Lab)/Ari Molofsky Lab Team Folder/Nathan Ewing-Crystal/RNASeq/Lesion snRNASeq/seurat/Data/rctd_immune.rds")
+
+#get weights for all spots (from myofibroblast prediction)
+weights1 <- spatial_fib@RCTD.reps[[1]]@results$weights
+weights2 <- spatial_fib@RCTD.reps[[2]]@results$weights
+weights3 <- spatial_fib@RCTD.reps[[3]]@results$weights # Weights for each cell type per barcode
+
+# Normalize per spot weights so cell type probabilities sum to 1 for each spot
+norm1 <- normalize_weights(weights1) 
+norm2 <- normalize_weights(weights2) 
+norm3 <- normalize_weights(weights3) 
+
+#normalized myofibroblast weights for all coords
+myo_1 <- norm1[,"Fibroblast_Fn1"]
+myo_2 <- norm2[,"Fibroblast_Fn1"]
+myo_3 <- norm3[,"Fibroblast_Fn1"]
+myo_weights = c(myo_1, myo_2, myo_3)
+
+#get weights for all spots (from immune prediction)
+weights1 <- spatial_immune@RCTD.reps[[1]]@results$weights
+weights2 <- spatial_immune@RCTD.reps[[2]]@results$weights
+weights3 <- spatial_immune@RCTD.reps[[3]]@results$weights # Weights for each cell type per barcode
+
+# Normalize per spot weights so cell type probabilities sum to 1 for each spot
+norm1 <- normalize_weights(weights1) 
+norm2 <- normalize_weights(weights2) 
+norm3 <- normalize_weights(weights3) 
+
+#DAM weights for all coords
+dam_1 <- norm1[,"DAMs"]
+dam_2 <- norm2[,"DAMs"]
+dam_3 <- norm3[,"DAMs"]
+dam_weights = c(dam_1, dam_2, dam_3)
+
+
+#SAM weights for all coords
+sam_1 <- norm1[,"Macrophage_Ldlrad3"]
+sam_2 <- norm2[,"Macrophage_Ldlrad3"]
+sam_3 <- norm3[,"Macrophage_Ldlrad3"]
+sam_weights = c(sam_1, sam_2, sam_3)
+
+#check
+table(names(myo_weights) == names(dam_weights))
+table(names(myo_weights) == names(sam_weights))
+
+combined = data.frame(myo_weights, dam_weights, sam_weights)
+
+Plotfolder = "Plots/visium"
+
+for(mac in colnames(combined)[2:length(colnames(combined))]){
+  fib = colnames(combined)[1] #set variable for getting weight, but also useful for naming plot
+  #get columns to correlate
+  fib_weights = combined[,fib]
+  mac_weights = combined[,mac]
+  plot_data = data.frame(fib_weights, mac_weights)
+  colnames(plot_data) = c(fib, mac)
+  p1 = ggscatter(plot_data, x = fib, y = mac, 
+          title = paste0(fib, " vs. ", mac),
+          add = "reg.line", conf.int = TRUE, add.params=list(color="red"),
+          cor.coef = TRUE, cor.method = "pearson", cor.coef.size = 5,
+          xlab = "fib_weights", ylab = mac)
+  
+  setEPS()
+  postscript(file.path(dir, Plotfolder, paste0(fib, "_vs_", mac, "_correlation.eps")))
+  print(p1)
+  dev.off()
+}
+```
+
+#correlate SAM/DAM with myofibroblast - repeat 7dpi only
+```{r}
+spatial_fib = readRDS("/Users/nathanewing-crystal/Dropbox (Ari Molofsky Lab)/Ari Molofsky Lab Team Folder/Nathan Ewing-Crystal/RNASeq/Lesion snRNASeq/seurat/Data/rctd_fib.rds")
+spatial_immune = readRDS("/Users/nathanewing-crystal/Dropbox (Ari Molofsky Lab)/Ari Molofsky Lab Team Folder/Nathan Ewing-Crystal/RNASeq/Lesion snRNASeq/seurat/Data/rctd_immune.rds")
+
+#get weights for all spots (from myofibroblast prediction)
+weights <- spatial_fib@RCTD.reps[[2]]@results$weights
+
+# Normalize per spot weights so cell type probabilities sum to 1 for each spot
+norm <- normalize_weights(weights) 
+
+#normalized myofibroblast weights for all coords 7dpi
+myo_weights <- norm[,"Fibroblast_Fn1"]
+
+#get weights for all spots (from immune prediction)
+weights <- spatial_immune@RCTD.reps[[2]]@results$weights
+
+# Normalize per spot weights so cell type probabilities sum to 1 for each spot
+norm <- normalize_weights(weights) 
+
+#DAM weights for all coords 7dpi
+dam_weights <- norm[,"DAMs"]
+
+#SAM weights for all coords 7dpi
+sam_weights <- norm[,"Macrophage_Ldlrad3"]
+
+#check
+table(names(myo_weights) == names(dam_weights))
+table(names(myo_weights) == names(sam_weights))
+
+combined = data.frame(myo_weights, dam_weights, sam_weights)
+
+Plotfolder = "Plots/visium"
+
+for(mac in colnames(combined)[2:length(colnames(combined))]){
+  fib = colnames(combined)[1] #set variable for getting weight, but also useful for naming plot
+  #get columns to correlate
+  fib_weights = combined[,fib]
+  mac_weights = combined[,mac]
+  plot_data = data.frame(fib_weights, mac_weights)
+  colnames(plot_data) = c(fib, mac)
+  p1 = ggscatter(plot_data, x = fib, y = mac, 
+          title = paste0(fib, " vs. ", mac, " 7dpi"),
+          add = "reg.line", conf.int = TRUE, add.params=list(color="red"),
+          cor.coef = TRUE, cor.method = "pearson", cor.coef.size = 5,
+          xlab = "fib_weights", ylab = mac)
+  
+  setEPS()
+  postscript(file.path(dir, Plotfolder, paste0(fib, "_vs_", mac, "_correlation_7dpi.eps")))
+  print(p1)
+  dev.off()
+}
+```

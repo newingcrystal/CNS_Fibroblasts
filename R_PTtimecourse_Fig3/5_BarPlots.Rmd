@@ -1,0 +1,862 @@
+---
+title: "Plots"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#install.packages("BiocManager")
+#BiocManager::install("Seurat")
+#BiocManager::install("ggplot2")
+#BiocManager::install("sctransform")
+
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+library(ape)
+library(cowplot)
+library(Matrix)
+library(EnhancedVolcano)
+library(knitr)
+library(readr)
+library(RColorBrewer)
+
+#Specify your preferred directory for all input + output
+dir = "/Users/nathanewing-crystal/Dropbox (Ari Molofsky Lab)/Ari Molofsky Lab Team Folder/Nathan Ewing-Crystal/RNASeq/Lesion snRNASeq/seurat"
+#Specify exactly where your seurat files live
+datafolder = "Data/Seurat"
+
+project<-"lesion_snRNASeq" 
+
+#seurat objects for barplots
+subsets = c("total", "fib", "immune")
+
+#set up folders
+Plotfolder = "Plots"
+
+#load(file.choose())
+
+sobject_list = list(sobject, sobject.sub.fib, sobject.sub.immune)
+```
+
+Barplot for any two (or more) categories
+
+```{r}
+#Pick metadata columns
+clustercolumn = "celltype"
+samplecolumn = "timepoint_genotype"
+#pick a reasonable number of cells per sample to normalize by
+ncells = 2000 
+cols = brewer.pal(n = 6, name = "Dark2")
+cols.4 = brewer.pal(n=4, name = "Dark2")
+cols.3 = brewer.pal(n=3, name = "Dark2")
+cols.2 = c("#1B9E77", "#D95F02")
+
+#If you want to only compare particular samples/conditions, split further by another metadata column: 
+# split = NULL
+```
+
+
+```{r}
+# splitby = levels(as.factor(sobject[[split]][,1]))
+
+for (i in 1:length(subsets)){
+    
+  subset = subsets[i]
+  sobject_sub = sobject_list[[i]]
+  
+  #reorder
+  samples_rev = c("Rest WT", "2dpi WT", "7dpi WT", "21dpi WT", "7dpi Col1a2 cKO", "7dpi Cdh5 cKO")
+  samples = rev(samples_rev)
+  
+  #Make a table and normalize
+  r = table(sobject_sub[[clustercolumn]][,1],sobject_sub[[samplecolumn]][,1])
+  rdf = as.data.frame.matrix(r)
+  rdf = rdf[, samples]
+  r = rdf
+  
+  
+  #EDITED - splitby code did not work, so instead subsetted to WT stroke and deleted for loop.
+  #Split the table
+  #for (i in splitby){
+  #  x = grep(i,colnames(r))
+  #  t = r[,x]
+  
+  t = r  
+    #remove any clusters that don't have cells
+  t = t[rowSums(t)>0,]
+    
+    #look at fibroblasts and immune cells in total sobject, fibroblasts in fibroblast sobject, and immune cells in immune cells sobject
+  if(subset == "total"){
+    t = t[c("Fibroblasts_1", "Fibroblasts_2", "Fibroblasts_3", "Fibroblasts_4", "Mural_Pericytes", "Fibroblasts_prolif", "Microglia_Macrophages", "Myeloid", "T-Cells", "Microglia_prolif"),]
+  } else if(subset == "fib"){
+    t = t[c("Fibroblasts_1", "Fibroblasts_2", "Fibroblasts_3", "Fibroblasts_4", "Mural_Pericytes", "Fibroblasts_prolif"),]
+  } else if(subset == "immune"){
+    t = t[c("Microglia_Macrophages", "Myeloid", "T-Cells", "Microglia_prolif"),]
+  } else{
+    print("UNKNOWN SUBSET")
+    break
+  }
+    
+    #normalize by sample
+    t = apply(t,MARGIN = 2,function(x)x/sum(x))
+    t = round(t*ncells,0)
+    
+    #convert to percents for each cluster
+    t = apply(t,MARGIN = 1,function(x)x/sum(x))
+    t = round(t*100,2)
+    
+    name = paste0(project,"_", subset, "_cluster-frequencies")
+    
+    setEPS()
+    postscript(file.path(dir,"Plots/Barplots",paste0(name,"barplot.eps")))
+    barplot(t, main="Cluster composition by sample",
+         # xlab="Cluster", 
+         ylab = "% of cluster", ylim = c(0,100), col=cols,axisnames = T,
+          width = .2,xlim = c(0,5), space = 0.6,cex.names = 0.7,axis.lty = 1, las=2, mgp=c())
+    title(xlab = "Cluster", line = 4)
+    legend("topright", legend=rownames(t), fill=cols, bg="white", inset=c(0.08, 0.2))
+    dev.off()
+  
+    print(barplot(t, main="Cluster composition by sample",
+         # xlab="Cluster", 
+         ylab = "% of cluster", ylim = c(0,100), col=cols,axisnames = T,
+          width = .2,xlim = c(0,5), space = 0.6,cex.names = 0.7,axis.lty = 1, las=2, mgp=c()))
+    title(xlab = "Cluster", line = 4)
+    legend("topright", legend=rownames(t), fill=cols, bg="white", inset=c(0.08, 0.2))
+  #}
+  
+  #Instead of % cluster, % of total cells in each sample
+    
+    t = r  
+    #remove any clusters that don't have cells
+    t = t[rowSums(t)>0,]
+    
+     #look at fibroblasts and immune cells in total sobject, fibroblasts in fibroblast sobject, and immune cells in immune cells sobject
+  if(subset == "total"){
+    t = t[c("Fibroblasts_1", "Fibroblasts_2", "Fibroblasts_3", "Fibroblasts_4", "Mural_Pericytes", "Fibroblasts_prolif", "Microglia_Macrophages", "Myeloid", "T-Cells", "Microglia_prolif"),]
+  } else if(subset == "fib"){
+    t = t[c("Fibroblasts_1", "Fibroblasts_2", "Fibroblasts_3", "Fibroblasts_4", "Mural_Pericytes", "Fibroblasts_prolif"),]
+  } else if(subset == "immune"){
+    t = t[c("Microglia_Macrophages", "Myeloid", "T-Cells", "Microglia_prolif"),]
+  } else{
+    print("UNKNOWN SUBSET")
+    break
+  }
+    
+    #normalize by sample
+    t = apply(t,MARGIN = 2,function(x)x/sum(x))
+    t = round(t*ncells,0)
+    
+    #convert to percents for each *sample*
+    t = apply(t,MARGIN = 2,function(x)x/sum(x))
+    t = round(t*100,2)
+    
+    name = paste0(project,"_", subset, "_sample-frequencies")
+    
+    setEPS()
+    postscript(file.path(dir,"Plots/Barplots",paste0(name,"barplot.eps")))
+    barplot(t(t), main="Sample composition by cluster",
+         ylab = "% of sample", col=cols,axisnames = T, ylim=c(0,100),
+          width = .2, cex.names = 0.7,axis.lty = 1, las=2, mgp=c(), beside=TRUE)
+    title(xlab = "Cluster", line = 4)
+    legend("topright", legend=rownames(t(t)), fill=cols, bg="white", inset=c(0.02, 0.02))
+    dev.off()
+  
+    print(barplot(t(t), main="Sample composition cluster",
+         ylab = "% of sample", col=cols,axisnames = T, ylim=c(0,100),
+          width = .2, cex.names = 0.7,axis.lty = 1, las=2, mgp=c(), beside=TRUE))
+    title(xlab = "Cluster", line = 4)
+    legend("topright", legend=rownames(t(t)), fill=cols, bg="white", inset=c(0.02, 0.02))
+}
+```
+
+```{r}
+#Below uses reclustered fib (see 6_Fibroblast_subset.Rmd)
+  sobject_sub = sobject.sub.fib
+#  clustercolumn = "seurat_clusters"
+clustercolumn = "fibtype"
+  
+  #Make a table and normalize
+  r = table(sobject_sub[[clustercolumn]][,1],sobject_sub[[samplecolumn]][,1])
+  
+  t = r  
+    #remove any clusters that don't have cells
+  t = t[rowSums(t)>0,]
+    
+    #normalize by sample
+    t = apply(t,MARGIN = 2,function(x)x/sum(x))
+    t = round(t*ncells,0)
+    
+    #convert to percents for each cluster
+    t = apply(t,MARGIN = 1,function(x)x/sum(x))
+    t = round(t*100,2)
+    
+    name = paste0(project,"_", "fib_reclustered", "_cluster-frequencies")
+    
+    setEPS()
+    postscript(file.path(dir,"Plots/Fibroblast Subset/Barplots",paste0(name,"barplot.eps")))
+    barplot(t, main="Cluster composition by sample",
+         # xlab="Cluster", 
+         ylab = "% of cluster", ylim = c(0,100), col=cols,axisnames = T,
+          width = .2,xlim = c(0,5), space = 0.6,cex.names = 0.7,axis.lty = 1, las=2, mgp=c())
+    title(xlab = "Cluster", line = 4)
+    legend("topright", legend=rownames(t), fill=cols, bg="white", inset=c(-1.0, 0))
+    dev.off()
+  
+    print(barplot(t, main="Cluster composition by sample",
+         # xlab="Cluster", 
+         ylab = "% of cluster", ylim = c(0,100), col=cols,axisnames = T,
+          width = .2,xlim = c(0,5), space = 0.6,cex.names = 0.7,axis.lty = 1, las=2, mgp=c()))
+    title(xlab = "Cluster", line = 4)
+    legend("topright", legend=rownames(t), fill=cols, bg="white", inset=c(-1.0, 0))
+  #}
+  
+  #Instead of % cluster, % of total cells in each sample
+    
+    t = r  
+    #remove any clusters that don't have cells
+    t = t[rowSums(t)>0,]
+    
+    #normalize by sample
+    t = apply(t,MARGIN = 2,function(x)x/sum(x))
+    t = round(t*ncells,0)
+    
+    #convert to percents for each *sample*
+    t = apply(t,MARGIN = 2,function(x)x/sum(x))
+    t = round(t*100,2)
+    
+    name = paste0(project,"_", "fib_reclustered", "_sample-frequencies")
+    
+    setEPS()
+    postscript(file.path(dir,"Plots/Fibroblast Subset/Barplots",paste0(name,"barplot.eps")))
+    barplot(t(t), main="Sample composition by cluster",
+         ylab = "% of sample", col=cols,axisnames = T, ylim=c(0,50),
+          width = .2, cex.names = 0.7,axis.lty = 1, las=2, mgp=c(), beside=TRUE)
+    title(xlab = "Cluster", line = 4)
+    legend("topright", legend=rownames(t(t)), fill=cols, bg="white", inset=c(0.02, 0.02))
+    dev.off()
+  
+    print(barplot(t(t), main="Sample composition by cluster",
+         ylab = "% of sample", col=cols,axisnames = T, ylim=c(0,50),
+          width = .2, cex.names = 0.7,axis.lty = 1, las=2, mgp=c(), beside=TRUE))
+    title(xlab = "Cluster", line = 4)
+    legend("topright", legend=rownames(t(t)), fill=cols, bg="white", inset=c(0.02, 0.02))
+```
+
+```{r}
+#Below uses reclustered fib - WT only (+ meninges/mural) (see 6_Fibroblast_subset.Rmd)
+  sobject_sub = sobject.sub.fib.wt.all
+#  clustercolumn = "seurat_clusters"
+clustercolumn = "fibtype"
+  
+  #Make a table and normalize
+  r = table(sobject_sub[[clustercolumn]][,1],sobject_sub[[samplecolumn]][,1])
+  
+  t = r  
+  
+    #remove any clusters that don't have cells
+  t = t[rowSums(t)>0,]
+    
+    #normalize by sample
+    t = apply(t,MARGIN = 2,function(x)x/sum(x))
+    t = round(t*ncells,0)
+    
+    #convert to percents for each cluster
+    t = apply(t,MARGIN = 1,function(x)x/sum(x))
+    t = round(t*100,2)
+    
+    name = paste0(project,"_", "fib_reclustered-WT-all", "_cluster-frequencies")
+    
+    setEPS()
+    postscript(file.path(dir,"Plots/Fibroblast Subset/Barplots",paste0(name,"barplot.eps")))
+    barplot(t, main="Cluster composition by sample",
+         # xlab="Cluster", 
+         ylab = "% of cluster", ylim = c(0,100), col=cols.4,axisnames = T,
+          width = .2,xlim = c(0,5), space = 0.6,cex.names = 0.7,axis.lty = 1, las=2, mgp=c())
+    title(xlab = "Cluster", line = 4)
+    legend("topright", legend=rownames(t), fill=cols.4, bg="white", inset=c(-1.0, 0))
+    dev.off()
+  
+    print(barplot(t, main="Cluster composition by sample",
+         # xlab="Cluster", 
+         ylab = "% of cluster", ylim = c(0,100), col=cols.4,axisnames = T,
+          width = .2,xlim = c(0,5), space = 0.6,cex.names = 0.7,axis.lty = 1, las=2, mgp=c()))
+    title(xlab = "Cluster", line = 4)
+    legend("topright", legend=rownames(t), fill=cols.4, bg="white", inset=c(-1.0, 0))
+  #}
+  
+  #Instead of % cluster, % of total cells in each sample
+    
+    t = r  
+    #remove any clusters that don't have cells
+    t = t[rowSums(t)>0,]
+    
+    #normalize by sample
+    t = apply(t,MARGIN = 2,function(x)x/sum(x))
+    t = round(t*ncells,0)
+    
+    #convert to percents for each *sample*
+    t = apply(t,MARGIN = 2,function(x)x/sum(x))
+    t = round(t*100,2)
+    
+    name = paste0(project,"_", "fib_reclustered-WT-all", "_sample-frequencies")
+    
+    setEPS()
+    postscript(file.path(dir,"Plots/Fibroblast Subset/Barplots",paste0(name,"barplot.eps")))
+    barplot(t(t), main="Sample composition by cluster",
+         ylab = "% of sample", col=cols.4,axisnames = T, ylim=c(0,50),
+          width = .2, cex.names = 0.7,axis.lty = 1, las=2, mgp=c(), beside=TRUE)
+    title(xlab = "Cluster", line = 4)
+    legend("topright", legend=rownames(t(t)), fill=cols.4, bg="white", inset=c(0.02, 0.02))
+    dev.off()
+  
+    print(barplot(t(t), main="Sample composition by cluster",
+         ylab = "% of sample", col=cols.4,axisnames = T, ylim=c(0,50),
+          width = .2, cex.names = 0.7,axis.lty = 1, las=2, mgp=c(), beside=TRUE))
+    title(xlab = "Cluster", line = 4)
+    legend("topright", legend=rownames(t(t)), fill=cols.4, bg="white", inset=c(0.02, 0.02))
+```
+
+```{r}
+#Below uses reclustered fib - 7dpi (see 6_Fibroblast_subset.Rmd)
+  sobject_sub = sobject.sub.fib.7dpi
+#  clustercolumn = "seurat_clusters"
+clustercolumn = "fibtype"
+  
+  #Make a table and normalize
+  r = table(sobject_sub[[clustercolumn]][,1],sobject_sub[[samplecolumn]][,1])
+  
+  t = r  
+    #remove any clusters that don't have cells
+  t = t[rowSums(t)>0,]
+    
+    #normalize by sample
+    t = apply(t,MARGIN = 2,function(x)x/sum(x))
+    t = round(t*ncells,0)
+    
+    #convert to percents for each cluster
+    t = apply(t,MARGIN = 1,function(x)x/sum(x))
+    t = round(t*100,2)
+    
+    name = paste0(project,"_", "fib_reclustered-7dpi", "_cluster-frequencies")
+    
+    setEPS()
+    postscript(file.path(dir,"Plots/Fibroblast Subset/Barplots",paste0(name,"barplot.eps")))
+    barplot(t, main="Cluster composition by sample",
+         # xlab="Cluster", 
+         ylab = "% of cluster", ylim = c(0,100), col=cols.3,axisnames = T,
+          width = .2,xlim = c(0,5), space = 0.6,cex.names = 0.7,axis.lty = 1, las=2, mgp=c())
+    title(xlab = "Cluster", line = 4)
+    legend("topright", legend=rownames(t), fill=cols.3, bg="white", inset=c(-1.0, 0))
+    dev.off()
+  
+    print(barplot(t, main="Cluster composition by sample",
+         # xlab="Cluster", 
+         ylab = "% of cluster", ylim = c(0,100), col=cols.3,axisnames = T,
+          width = .2,xlim = c(0,5), space = 0.6,cex.names = 0.7,axis.lty = 1, las=2, mgp=c()))
+    title(xlab = "Cluster", line = 4)
+    legend("topright", legend=rownames(t), fill=cols.3, bg="white", inset=c(-1.0, 0))
+  #}
+  
+  #Instead of % cluster, % of total cells in each sample
+    
+    t = r  
+    #remove any clusters that don't have cells
+    t = t[rowSums(t)>0,]
+    
+    #normalize by sample
+    t = apply(t,MARGIN = 2,function(x)x/sum(x))
+    t = round(t*ncells,0)
+    
+    #convert to percents for each *sample*
+    t = apply(t,MARGIN = 2,function(x)x/sum(x))
+    t = round(t*100,2)
+    
+    name = paste0(project,"_", "fib_reclustered-7dpi", "_sample-frequencies")
+    
+    setEPS()
+    postscript(file.path(dir,"Plots/Fibroblast Subset/Barplots",paste0(name,"barplot.eps")))
+    barplot(t(t), main="Sample composition by cluster",
+         ylab = "% of sample", col=cols.3,axisnames = T, ylim=c(0,50),
+          width = .2, cex.names = 0.7,axis.lty = 1, las=2, mgp=c(), beside=TRUE)
+    title(xlab = "Cluster", line = 4)
+    legend("topright", legend=rownames(t(t)), fill=cols.3, bg="white", inset=c(0.02, 0.02))
+    dev.off()
+  
+    print(barplot(t(t), main="Sample composition by cluster",
+         ylab = "% of sample", col=cols.3,axisnames = T, ylim=c(0,50),
+          width = .2, cex.names = 0.7,axis.lty = 1, las=2, mgp=c(), beside=TRUE))
+    title(xlab = "Cluster", line = 4)
+    legend("topright", legend=rownames(t(t)), fill=cols.3, bg="white", inset=c(0.02, 0.02))
+```
+
+```{r}
+#Below uses reclustered fib - 7dpi (see 6_Fibroblast_subset.Rmd)
+#compare ONLY Col1a2 cKO vs. WT (exclude Cdh5)
+  sobject_sub = sobject.sub.fib.7dpi
+#  clustercolumn = "seurat_clusters"
+clustercolumn = "fibtype"
+  
+  #Make a table and normalize
+  r = table(sobject_sub[[clustercolumn]][,1],sobject_sub[[samplecolumn]][,1])
+  r = r[,2:3]
+  
+  t = r  
+    #remove any clusters that don't have cells
+  t = t[rowSums(t)>0,]
+    
+    #normalize by sample
+    t = apply(t,MARGIN = 2,function(x)x/sum(x))
+    t = round(t*ncells,0)
+    
+    #convert to percents for each cluster
+    t = apply(t,MARGIN = 1,function(x)x/sum(x))
+    t = round(t*100,2)
+    
+    name = paste0(project,"_", "fib_reclustered-7dpi_Col1a2-cKO-ONLY", "_cluster-frequencies")
+    
+    setEPS()
+    postscript(file.path(dir,"Plots/Fibroblast Subset/Barplots",paste0(name,"barplot.eps")), height = 5)
+    barplot(t, main="Cluster composition by sample",
+         # xlab="Cluster", 
+         #ylab = "% of cluster", 
+         ylim = c(0,100), col=cols.2,axisnames = T,
+          width = .2,xlim = c(0,5), space = 0.6,cex.names = 1.5, cex.axis = 1.5, axis.lty = 1, las=2, mgp=c())
+    legend("topright", legend=rownames(t), fill=cols.2, bg="white")
+    dev.off()
+  
+    print(barplot(t, main="Cluster composition by sample",
+         # xlab="Cluster", 
+         ylab = "% of cluster", ylim = c(0,100), col=cols.2,axisnames = T,
+          width = .2,xlim = c(0,5), space = 0.6,cex.names = 0.7,axis.lty = 1, las=2, mgp=c()))
+    title(xlab = "Cluster", line = 4)
+    legend("topright", legend=rownames(t), fill=cols.2, bg="white")
+  #}
+  
+  #Instead of % cluster, % of total cells in each sample
+    
+    t = r  
+    #remove any clusters that don't have cells
+    t = t[rowSums(t)>0,]
+    
+    #normalize by sample
+    t = apply(t,MARGIN = 2,function(x)x/sum(x))
+    t = round(t*ncells,0)
+    
+    #convert to percents for each *sample*
+    t = apply(t,MARGIN = 2,function(x)x/sum(x))
+    t = round(t*100,2)
+    
+    name = paste0(project,"_", "fib_reclustered-7dpi_Col1a2-cKO-ONLY", "_sample-frequencies")
+    
+    setEPS()
+    postscript(file.path(dir,"Plots/Fibroblast Subset/Barplots",paste0(name,"barplot.eps")))
+    barplot(t(t), main="Sample composition by cluster",
+         ylab = "% of sample", col=cols.2,axisnames = T, ylim=c(0,50),
+          width = .2, cex.names = 0.7,axis.lty = 1, las=2, mgp=c(), beside=TRUE)
+    title(xlab = "Cluster", line = 4)
+    legend("topright", legend=rownames(t(t)), fill=cols.2, bg="white", inset=c(0.02, 0.02))
+    dev.off()
+  
+    print(barplot(t(t), main="Sample composition by cluster",
+         ylab = "% of sample", col=cols.2,axisnames = T, ylim=c(0,50),
+          width = .2, cex.names = 0.7,axis.lty = 1, las=2, mgp=c(), beside=TRUE))
+    title(xlab = "Cluster", line = 4)
+    legend("topright", legend=rownames(t(t)), fill=cols.2, bg="white", inset=c(0.02, 0.02))
+```
+
+```{r}
+# Below uses total sobject, with fib clusters added, cluster 7/10 removed, meninges removed, WT only
+# measure fibroblast subsets across timepoints as % of a) total cells or b) lesion
+sobject_sub = sobject
+clustercolumn = "fibtype"
+  
+  #Make a table and normalize
+  r = table(sobject_sub[[clustercolumn]][,1],sobject_sub[[samplecolumn]][,1])
+    
+    t = r  
+    #remove any clusters that don't have cells
+    t = t[rowSums(t)>0,]
+    
+    #normalize by sample
+    t = apply(t,MARGIN = 2,function(x)x/sum(x))
+    t = round(t*ncells,0)
+    
+    #convert to percents for each *sample*
+    t = apply(t,MARGIN = 2,function(x)x/sum(x))
+    t = round(t*100,2)
+    
+    #reorder (by timepoint)
+    tdf = as.data.frame(t)
+    tdf = tdf[,c("Rest WT", "2dpi WT", "7dpi WT", "21dpi WT")]
+    t = tdf
+    
+    clusters_to_keep = c("Fibroblast_Prolif", "Fibroblast_Fn1", "Fibroblast_Cd80", "Fibroblast_Ghr", "Fibroblast_Lama1", "Fibroblast_Ptgds", "Fibroblast_Tmeff2")
+    t = t[clusters_to_keep,]
+
+    name = paste0(project,"_", "_nomen_no710_fibtype", "_cluster-frequencies_of_total")
+    
+    setEPS()
+    postscript(file.path(dir,"Plots/Barplots",paste0(name,"barplot.eps")))
+    barplot(t(t), main="Sample composition by cluster",
+         ylab = "% of sample", col=cols.4,axisnames = T,
+          width = .2, cex.names = 0.7,axis.lty = 1, las=2, mgp=c(), beside=TRUE)
+    title(xlab = "Cluster", line = 4)
+    legend("topright", legend=rownames(t(t)), fill=cols.4, bg="white", inset=c(0.7, 0.0))
+    dev.off()
+  
+    print(barplot(t(t), main="Sample composition by cluster",
+         ylab = "% of sample", col=cols.4,axisnames = T,
+          width = .2, cex.names = 0.7,axis.lty = 1, las=2, mgp=c(), beside=TRUE))
+    title(xlab = "Cluster", line = 4)
+    legend("topright", legend=rownames(t(t)), fill=cols.4, bg="white", inset=c(0.7, 0.02))
+    
+    #below, % of lesion instead of % of total cells
+    
+    Idents(sobject) = "microanatomy"
+    sobject_sub = subset(sobject, idents = "Lesion")
+clustercolumn = "fibtype"
+  
+  #Make a table and normalize
+  r = table(sobject_sub[[clustercolumn]][,1],sobject_sub[[samplecolumn]][,1])
+    
+    t = r  
+    #remove any clusters that don't have cells
+    t = t[rowSums(t)>0,]
+    
+    #normalize by sample
+    t = apply(t,MARGIN = 2,function(x)x/sum(x))
+    t = round(t*ncells,0)
+    
+    #convert to percents for each *sample*
+    t = apply(t,MARGIN = 2,function(x)x/sum(x))
+    t = round(t*100,2)
+    
+    #reorder (by timepoint)
+    tdf = as.data.frame(t)
+    tdf = tdf[,c("2dpi WT", "7dpi WT", "21dpi WT")]
+    t = tdf
+    
+    clusters_to_keep = c("Fibroblast_Prolif", "Fibroblast_Fn1", "Fibroblast_Cd80", "Fibroblast_Ghr", "Fibroblast_Lama1", "Fibroblast_Ptgds", "Fibroblast_Tmeff2")
+    t = t[clusters_to_keep,]
+
+    name = paste0(project,"_", "_nomen_no710_fibtype", "_cluster-frequencies_of_lesion")
+    
+    setEPS()
+    postscript(file.path(dir,"Plots/Barplots",paste0(name,"barplot.eps")))
+    barplot(t(t), main="Sample composition by cluster",
+         ylab = "% of sample", col=cols.3,axisnames = T, ylim = c(0, 20),
+          width = .2, cex.names = 0.7,axis.lty = 1, las=2, mgp=c(), beside=TRUE)
+    title(xlab = "Cluster", line = 4)
+    legend("topright", legend=rownames(t(t)), fill=cols.3, bg="white", inset=c(0.08, 0.02))
+    dev.off()
+  
+    print(barplot(t(t), main="Sample composition by cluster",
+         ylab = "% of sample", col=cols.3,axisnames = T, ylim = c(0, 20),
+          width = .2, cex.names = 0.7,axis.lty = 1, las=2, mgp=c(), beside=TRUE))
+    title(xlab = "Cluster", line = 4)
+    legend("topright", legend=rownames(t(t)), fill=cols.3, bg="white", inset=c(0.08, 0.02))
+```
+
+```{r}
+#Below uses reclustered immune cells
+  sobject_sub = sobject.sub.immune
+#  clustercolumn = "seurat_clusters"
+clustercolumn = "immunetype"
+  
+  #Make a table and normalize
+  r = table(sobject_sub[[clustercolumn]][,1],sobject_sub[[samplecolumn]][,1])
+  
+  t = r  
+    #remove any clusters that don't have cells
+  t = t[rowSums(t)>0,]
+    
+    #normalize by sample
+    t = apply(t,MARGIN = 2,function(x)x/sum(x))
+    t = round(t*ncells,0)
+    
+    #convert to percents for each cluster
+    t = apply(t,MARGIN = 1,function(x)x/sum(x))
+    t = round(t*100,2)
+    
+    name = paste0(project,"_", "immune_reclustered", "_cluster-frequencies")
+    
+    setEPS()
+    postscript(file.path(dir,"Plots/Immune Subset/Barplots",paste0(name,"barplot.eps")))
+    barplot(t, main="Cluster composition by sample",
+         # xlab="Cluster", 
+         ylab = "% of cluster", ylim = c(0,100), col=cols,axisnames = T,
+          width = .2,xlim = c(0,5), space = 0.6,cex.names = 0.7,axis.lty = 1, las=2, mgp=c())
+    title(xlab = "Cluster", line = 4)
+    legend("topright", legend=rownames(t), fill=cols, bg="white")
+    dev.off()
+  
+    print(barplot(t, main="Cluster composition by sample",
+         # xlab="Cluster", 
+         ylab = "% of cluster", ylim = c(0,100), col=cols,axisnames = T,
+          width = .2,xlim = c(0,5), space = 0.6,cex.names = 0.7,axis.lty = 1, las=2, mgp=c()))
+    title(xlab = "Cluster", line = 4)
+    legend("topright", legend=rownames(t), fill=cols, bg="white")
+  #}
+  
+  #Instead of % cluster, % of total cells in each sample
+    
+    t = r  
+    #remove any clusters that don't have cells
+    t = t[rowSums(t)>0,]
+    
+    #normalize by sample
+    t = apply(t,MARGIN = 2,function(x)x/sum(x))
+    t = round(t*ncells,0)
+    
+    #convert to percents for each *sample*
+    t = apply(t,MARGIN = 2,function(x)x/sum(x))
+    t = round(t*100,2)
+    
+    name = paste0(project,"_", "immune_reclustered", "_sample-frequencies")
+    
+    setEPS()
+    postscript(file.path(dir,"Plots/Immune Subset/Barplots",paste0(name,"barplot.eps")))
+    barplot(t(t), main="Sample composition by cluster",
+         ylab = "% of sample", col=cols,axisnames = T, ylim=c(0,50),
+          width = .2, cex.names = 0.7,axis.lty = 1, las=2, mgp=c(), beside=TRUE)
+    title(xlab = "Cluster", line = 4)
+    legend("topright", legend=rownames(t(t)), fill=cols, bg="white", inset=c(0.02, 0.02))
+    dev.off()
+  
+    print(barplot(t(t), main="Sample composition by cluster",
+         ylab = "% of sample", col=cols,axisnames = T, ylim=c(0,50),
+          width = .2, cex.names = 0.7,axis.lty = 1, las=2, mgp=c(), beside=TRUE))
+    title(xlab = "Cluster", line = 4)
+    legend("topright", legend=rownames(t(t)), fill=cols, bg="white", inset=c(0.02, 0.02))
+```
+
+```{r}
+#Below uses reclustered immune cells - 7dpi (see 10_immune_subset.Rmd)
+#compare ONLY Col1a2 cKO vs. WT (exclude Cdh5)
+  sobject_sub = sobject.sub.immune.7dpi
+#  clustercolumn = "seurat_clusters"
+clustercolumn = "immunetype"
+  
+  #Make a table and normalize
+  r = table(sobject_sub[[clustercolumn]][,1],sobject_sub[[samplecolumn]][,1])
+  r = r[,2:3]
+  
+  t = r  
+    #remove any clusters that don't have cells
+  t = t[rowSums(t)>0,]
+    
+    #normalize by sample
+    t = apply(t,MARGIN = 2,function(x)x/sum(x))
+    t = round(t*ncells,0)
+    
+    #convert to percents for each cluster
+    t = apply(t,MARGIN = 1,function(x)x/sum(x))
+    t = round(t*100,2)
+    
+    name = paste0(project,"_", "immune_reclustered-7dpi_Col1a2-cKO-ONLY", "_cluster-frequencies")
+    
+    setEPS()
+    postscript(file.path(dir,"Plots/Immune Subset/Barplots",paste0(name,"barplot.eps")))
+    barplot(t, main="Cluster composition by sample",
+         # xlab="Cluster", 
+         ylab = "% of cluster", ylim = c(0,100), col=cols.2,axisnames = T,
+          width = .2,xlim = c(0,5), space = 0.6,cex.names = 0.7,axis.lty = 1, las=2, mgp=c())
+    title(xlab = "Cluster", line = 4)
+    legend("topright", legend=rownames(t), fill=cols.2, bg="white")
+    dev.off()
+  
+    print(barplot(t, main="Cluster composition by sample",
+         # xlab="Cluster", 
+         ylab = "% of cluster", ylim = c(0,100), col=cols.2,axisnames = T,
+          width = .2,xlim = c(0,5), space = 0.6,cex.names = 0.7,axis.lty = 1, las=2, mgp=c()))
+    title(xlab = "Cluster", line = 4)
+    legend("topright", legend=rownames(t), fill=cols.2, bg="white")
+  #}
+  
+  #Instead of % cluster, % of total cells in each sample
+    
+    t = r  
+    #remove any clusters that don't have cells
+    t = t[rowSums(t)>0,]
+    
+    #normalize by sample
+    t = apply(t,MARGIN = 2,function(x)x/sum(x))
+    t = round(t*ncells,0)
+    
+    #convert to percents for each *sample*
+    t = apply(t,MARGIN = 2,function(x)x/sum(x))
+    t = round(t*100,2)
+    
+    name = paste0(project,"_", "immune_reclustered-7dpi_Col1a2-cKO-ONLY", "_sample-frequencies")
+    
+    setEPS()
+    postscript(file.path(dir,"Plots/Immune Subset/Barplots",paste0(name,"barplot.eps")))
+    barplot(t(t), main="Sample composition by cluster",
+         ylab = "% of sample", col=cols.2,axisnames = T, ylim=c(0,50),
+          width = .2, cex.names = 0.7,axis.lty = 1, las=2, mgp=c(), beside=TRUE)
+    title(xlab = "Cluster", line = 4)
+    legend("topright", legend=rownames(t(t)), fill=cols.2, bg="white", inset=c(0.02, 0.02))
+    dev.off()
+  
+    print(barplot(t(t), main="Sample composition by cluster",
+         ylab = "% of sample", col=cols.2,axisnames = T, ylim=c(0,50),
+          width = .2, cex.names = 0.7,axis.lty = 1, las=2, mgp=c(), beside=TRUE))
+    title(xlab = "Cluster", line = 4)
+    legend("topright", legend=rownames(t(t)), fill=cols.2, bg="white", inset=c(0.02, 0.02))
+```
+
+
+```{r}
+#Below uses reclustered astrocytes
+  sobject_sub = sobject.sub.astro
+#  clustercolumn = "seurat_clusters"
+clustercolumn = "astrotype"
+  
+  #Make a table and normalize
+  r = table(sobject_sub[[clustercolumn]][,1],sobject_sub[[samplecolumn]][,1])
+  
+  t = r  
+    #remove any clusters that don't have cells
+  t = t[rowSums(t)>0,]
+    
+    #normalize by sample
+    t = apply(t,MARGIN = 2,function(x)x/sum(x))
+    t = round(t*ncells,0)
+    
+    #convert to percents for each cluster
+    t = apply(t,MARGIN = 1,function(x)x/sum(x))
+    t = round(t*100,2)
+    
+    name = paste0(project,"_", "astrocyte_reclustered", "_cluster-frequencies")
+    
+    setEPS()
+    postscript(file.path(dir,"Plots/Astrocyte Subset/Barplots",paste0(name,"barplot.eps")))
+    barplot(t, main="Cluster composition by sample",
+         # xlab="Cluster", 
+         ylab = "% of cluster", ylim = c(0,100), col=cols,axisnames = T,
+          width = .2,xlim = c(0,5), space = 0.6,cex.names = 0.7,axis.lty = 1, las=2, mgp=c())
+    title(xlab = "Cluster", line = 4)
+    legend("topright", legend=rownames(t), fill=cols, bg="white")
+    dev.off()
+  
+    print(barplot(t, main="Cluster composition by sample",
+         # xlab="Cluster", 
+         ylab = "% of cluster", ylim = c(0,100), col=cols,axisnames = T,
+          width = .2,xlim = c(0,5), space = 0.6,cex.names = 0.7,axis.lty = 1, las=2, mgp=c()))
+    title(xlab = "Cluster", line = 4)
+    legend("topright", legend=rownames(t), fill=cols, bg="white")
+  #}
+  
+  #Instead of % cluster, % of total cells in each sample
+    
+    t = r  
+    #remove any clusters that don't have cells
+    t = t[rowSums(t)>0,]
+    
+    #normalize by sample
+    t = apply(t,MARGIN = 2,function(x)x/sum(x))
+    t = round(t*ncells,0)
+    
+    #convert to percents for each *sample*
+    t = apply(t,MARGIN = 2,function(x)x/sum(x))
+    t = round(t*100,2)
+    
+    name = paste0(project,"_", "astrocyte_reclustered", "_sample-frequencies")
+    
+    setEPS()
+    postscript(file.path(dir,"Plots/Astrocyte Subset/Barplots",paste0(name,"barplot.eps")))
+    barplot(t(t), main="Sample composition by cluster",
+         ylab = "% of sample", col=cols,axisnames = T, ylim=c(0,100),
+          width = .2, cex.names = 0.7,axis.lty = 1, las=2, mgp=c(), beside=TRUE)
+    title(xlab = "Cluster", line = 4)
+    legend("topright", legend=rownames(t(t)), fill=cols, bg="white", inset=c(0.02, 0.02))
+    dev.off()
+  
+    print(barplot(t(t), main="Sample composition by cluster",
+         ylab = "% of sample", col=cols,axisnames = T, ylim=c(0,100),
+          width = .2, cex.names = 0.7,axis.lty = 1, las=2, mgp=c(), beside=TRUE))
+    title(xlab = "Cluster", line = 4)
+    legend("topright", legend=rownames(t(t)), fill=cols, bg="white", inset=c(0.02, 0.02))
+```
+
+
+```{r}
+#Below uses reclustered astrocytes, WT only
+  sobject_sub = sobject.sub.astro.wt
+#  clustercolumn = "seurat_clusters"
+clustercolumn = "astrotype"
+samplecolumn = "timepoint"
+  
+  #Make a table and normalize
+  r = table(sobject_sub[[clustercolumn]][,1],sobject_sub[[samplecolumn]][,1])
+  
+  t = r  
+    #remove any clusters that don't have cells
+  t = t[rowSums(t)>0,]
+    
+    #normalize by sample
+    t = apply(t,MARGIN = 2,function(x)x/sum(x))
+    t = round(t*ncells,0)
+    
+    #convert to percents for each cluster
+    t = apply(t,MARGIN = 1,function(x)x/sum(x))
+    t = round(t*100,2)
+    
+    name = paste0(project,"_", "astrocyte_reclustered_WT", "_cluster-frequencies")
+    
+    setEPS()
+    postscript(file.path(dir,"Plots/Astrocyte Subset/Barplots",paste0(name,"barplot.eps")))
+    barplot(t, main="Cluster composition by sample",
+         # xlab="Cluster", 
+         ylab = "% of cluster", ylim = c(0,100), col=cols.4,axisnames = T,
+          width = .2,xlim = c(0,5), space = 0.6,cex.names = 0.7,axis.lty = 1, las=2, mgp=c())
+    title(xlab = "Cluster", line = 4)
+    legend("topright", legend=rownames(t), fill=cols.4, bg="white")
+    dev.off()
+  
+    print(barplot(t, main="Cluster composition by sample",
+         # xlab="Cluster", 
+         ylab = "% of cluster", ylim = c(0,100), col=cols.4,axisnames = T,
+          width = .2,xlim = c(0,5), space = 0.6,cex.names = 0.7,axis.lty = 1, las=2, mgp=c()))
+    title(xlab = "Cluster", line = 4)
+    legend("topright", legend=rownames(t), fill=cols.4, bg="white")
+  #}
+  
+  #Instead of % cluster, % of total cells in each sample
+    
+    t = r  
+    #remove any clusters that don't have cells
+    t = t[rowSums(t)>0,]
+    
+    #normalize by sample
+    t = apply(t,MARGIN = 2,function(x)x/sum(x))
+    t = round(t*ncells,0)
+    
+    #convert to percents for each *sample*
+    t = apply(t,MARGIN = 2,function(x)x/sum(x))
+    t = round(t*100,2)
+    
+    name = paste0(project,"_", "astrocyte_reclustered_WT", "_sample-frequencies")
+    
+    setEPS()
+    postscript(file.path(dir,"Plots/Astrocyte Subset/Barplots",paste0(name,"barplot.eps")))
+    barplot(t(t), main="Sample composition by cluster",
+         ylab = "% of sample", col=cols.4,axisnames = T, ylim=c(0,100),
+          width = .2, cex.names = 0.7,axis.lty = 1, las=2, mgp=c(), beside=TRUE)
+    title(xlab = "Cluster", line = 4)
+    legend("topright", legend=rownames(t(t)), fill=cols.4, bg="white", inset=c(0.02, 0.02))
+    dev.off()
+  
+    print(barplot(t(t), main="Sample composition by cluster",
+         ylab = "% of sample", col=cols.4,axisnames = T, ylim=c(0,100),
+          width = .2, cex.names = 0.7,axis.lty = 1, las=2, mgp=c(), beside=TRUE))
+    title(xlab = "Cluster", line = 4)
+    legend("topright", legend=rownames(t(t)), fill=cols.4, bg="white", inset=c(0.02, 0.02))
+```
+
+

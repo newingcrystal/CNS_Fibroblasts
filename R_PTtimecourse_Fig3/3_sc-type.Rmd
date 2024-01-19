@@ -1,0 +1,120 @@
+---
+title: "SciType"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+***FROM:
+
+https://github.com/IanevskiAleksandr/sc-type/blob/master/README.md
+
+***
+
+```{r}
+# load libraries and functions
+#install.packages("HGNChelper")
+#install.packages("openxlsx")
+lapply(c("dplyr","Seurat","HGNChelper","openxlsx"), library, character.only = T)
+source("https://raw.githubusercontent.com/IanevskiAleksandr/sc-type/master/R/gene_sets_prepare.R"); source("https://raw.githubusercontent.com/IanevskiAleksandr/sc-type/master/R/sctype_score_.R")
+```
+
+#Load filtered seurat object
+```{r}
+load(file.choose())
+```
+
+```{r}
+#Specify your preferred directory for all input + output
+dir = "/Users/nathanewing-crystal/Dropbox (Ari Molofsky Lab)/Ari Molofsky Lab Team Folder/Nathan Ewing-Crystal/RNASeq/Lesion snRNASeq/seurat"
+#Specify exactly where your seurat files live
+datafolder = "Data/Seurat"
+
+project<-"lesion_snRNASeq" 
+
+#make a unique name; maybe this is the celltype you've already subset, or the age you're looking at, etc.
+iterationname = "scaled_processed"
+
+#choose sobject to use
+
+# sobject = sobject
+sobject = sobject.sub.immune
+
+# subset = ""
+subset = "_immune_"
+
+```
+
+```{r}
+# get cell-type-specific gene sets from our in-built database (DB)
+gs_list = gene_sets_prepare("https://raw.githubusercontent.com/IanevskiAleksandr/sc-type/master/ScTypeDB_short.xlsx", "Brain") # e.g. Immune system, Liver, Pancreas, Kidney, Eye, Brain
+
+# gs_list = gene_sets_prepare("https://raw.githubusercontent.com/IanevskiAleksandr/sc-type/master/ScTypeDB_short.xlsx", "Immune system") # e.g. Immune system, Liver, Pancreas, Kidney, Eye, Brain
+
+# get cell-type by cell matrix
+es.max = sctype_score(scRNAseqData = sobject[["RNA"]]@scale.data, scaled = TRUE, 
+                      gs = gs_list$gs_positive, gs2 = gs_list$gs_negative) 
+
+# merge by cluster
+cL_results = do.call("rbind", lapply(unique(sobject@meta.data$seurat_clusters), function(cl){
+    es.max.cl = sort(rowSums(es.max[ ,rownames(sobject@meta.data[sobject@meta.data$seurat_clusters==cl, ])]), decreasing = !0)
+    head(data.frame(cluster = cl, type = names(es.max.cl), scores = es.max.cl, ncells = sum(sobject@meta.data$seurat_clusters==cl)), 10)
+}))
+sctype_scores = cL_results %>% group_by(cluster) %>% top_n(n = 1, wt = scores)  
+
+# set low-confident (low ScType score) clusters to "unknown"
+sctype_scores$type[as.numeric(as.character(sctype_scores$scores)) < sctype_scores$ncells/4] = "Unknown"
+print(sctype_scores[,1:3])
+
+write.csv(sctype_scores,file = file.path(dir,"Spreadsheets/sctype",paste0(Project(sobject), subset, "_sc-type.csv")))
+#Fetched from Presidio
+#sctype_scores = read.csv(file.path(dir, "Spreadsheets", paste0(Project(sobject), "_sc-type.csv")))
+
+sobject@meta.data$sctype = ""
+for(j in unique(sctype_scores$cluster)){
+  cl_type = sctype_scores[sctype_scores$cluster==j,]; 
+  sobject@meta.data$sctype[sobject@meta.data$seurat_clusters == j] = as.character(cl_type$type[1])
+}
+```
+
+Function to print multiple graphs: 
+```{r}
+PrintSeuratGraph = function(namecard = "a",seurat_object = sobject,graphtype = "feature",feature = NULL,group = NULL,split=NULL,cellnames=NULL, label=FALSE){
+  if (!is.null(cellnames)){
+    #Idents(seurat_object) = cellnames[1]
+    #cells = colnames(seurat_object)[Idents(seurat_object) %in% cellnames[1:length(cellnames)]]} 
+    cells = cellnames}
+  else {cells = cellnames}
+  if (graphtype == "feature"){
+    graph = FeaturePlot(seurat_object,features = feature,split.by = split, cells = cells,cols = c("lightyellow","darkred"))
+  }
+  if (graphtype == "violin"){
+    graph = VlnPlot(seurat_object,features = feature, pt.size = 0.1, idents = cellnames[2:length(cellnames)],group.by = group, split.by = split)
+  }
+  if (graphtype == "dim"){
+    graph = DimPlot(seurat_object,cells = cells, group.by = group, split.by = split, label = label)
+  }
+  name = paste0(feature,"_",graphtype,namecard,".eps")
+  graph
+  setEPS()
+  postscript(file.path(dir,Plotfolder,name))
+  print(graph)
+  dev.off()
+}
+```
+
+```{r}
+name = paste0(project,"_",iterationname)
+Plotfolder = "Plots/sctype"
+group = "sctype"
+
+PrintSeuratGraph(namecard = name,graphtype = "dim",group = group, feature = group)
+PrintSeuratGraph(namecard = paste0(name,"_labeled_"),graphtype = "dim",group = group, feature = group, label = TRUE)
+```
+
+```{r}
+rm(sobject) #for clarity
+```
+

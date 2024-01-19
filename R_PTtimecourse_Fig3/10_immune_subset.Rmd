@@ -1,0 +1,962 @@
+---
+atitle: "10_Immune_subset"
+output: html_document
+date: "2023-05-30"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+library(ape)
+library(cowplot)
+library(Matrix)
+library(MAST)
+#install.packages('EnhancedVolcano')
+library(EnhancedVolcano)
+
+#BiocManager::install("Nebulosa")
+library("Nebulosa")
+```
+
+#Load immune seurat object
+```{r}
+load(file.choose())
+```
+
+```{r}
+#Specify your preferred directory for all input + output
+dir = "/Users/nathanewing-crystal/Ari Molofsky Lab Dropbox/Ari Molofsky Lab Team Folder/Nathan Ewing-Crystal/RNASeq/Lesion snRNASeq/seurat"
+#Specify exactly where your seurat files live
+datafolder = "Data/Seurat/Immune Subset"
+
+project<-"lesion_snRNASeq" 
+
+#set up folders
+QCfolder = "QC"
+Plotfolder = "Plots/Immune Subset"
+
+#Decide whether to use SCtransform (can take a long time with big datasets; generally recommended)
+sct = TRUE
+
+#You can add in housekeeping genes if you want them to be scaled always; otherwise set to "NULL"
+add.genes = NULL
+
+#How many genes do you want scaled to use for UMAP/clustering? 
+ngenes = 6000
+
+#Which principal components do you want to calculate on? This is a default setting, change if one of the pc's is for something you think is a technical error (i.e. HSP, RP, etc)
+pcs = c(1:30)
+
+#Choose what to regress out - could be age, sex, or any metadata column
+regress = c("nCount_RNA","percent.mito")
+
+#clustering resolution; the last number will be saved as "seurat_clusters" in metadata
+res = c(1.5,1.0,0.5, 0.25, 0.2, 0.15, 0.1)
+
+#metadata dimensions you want to cluster on
+dims = c("seurat_clusters","sample", "subsample", "timepoint","genotype", "microanatomy")
+
+#make a unique name; maybe this is the celltype you've already subset, or the age you're looking at, etc.
+iterationname = "immune_reclustered"
+
+#Establish cutoffs for heatmaps
+pval = 1e-3 #max p-value for significance
+lfc = 0.2 #minimum log fold change
+minpct = 0.05 #if you want to subset by percent cells in that cluster expressing the gene
+maxpct = 1
+single = F #should each gene be a marker of a single cluster only
+hgenes = 3 #how many genes should be in the heatmap per cluster
+ncells = 100 #max # of cells per heatmap column
+column = "seurat_clusters" #division you care about
+```
+
+Find variable features, normalize, scale, run PCA, clustering, umap
+The following is the standard method of normalization and scaling. Interchangeable with the next chunk. Run both, you should have already specified which to use with "sct = T or F". Will take 5-20 minutes to run. 
+```{r,results = 'hide',eval = FALSE}
+if (!sct){
+  sobject.sub.immune <- NormalizeData(sobject.sub.immune,normalization.method = "LogNormalize", scale.factor = 10000)
+  sobject.sub.immune<-FindVariableFeatures(sobject.sub.immune, selection.method = "vst", nfeatures = ngenes)
+  
+  all.genes<-rownames(sobject.sub.immune)
+  var.genes = VariableFeatures(sobject.sub.immune)
+  add.genes = add.genes[!add.genes %in% var.genes]
+  
+  any(add.genes %in% var.genes)
+  scalegenes = c(var.genes,add.genes)
+  VariableFeatures(sobject.sub.immune) = scalegenes
+  sobject.sub.immune<-ScaleData(sobject.sub.immune,features = VariableFeatures(sobject.sub.immune), vars.to.regress = regress)
+}
+```
+
+Alternative: SCTransform (great for smaller datasets)
+```{r, results='hide',eval = FALSE}
+if (sct){
+  sobject.sub.immune <- SCTransform(sobject.sub.immune, vars.to.regress = regress, verbose = FALSE,variable.features.n = ngenes,conserve.memory = T)
+}
+```
+
+Show most variable genes
+```{r}
+labels <- c(head(VariableFeatures(sobject.sub.immune),10),add.genes)
+plot1 = VariableFeaturePlot(sobject.sub.immune)
+LabelPoints(plot=plot1, points = labels, repel = F, xnudge = 0.1, ynudge = 0.5)
+```
+
+Run PCA analysis and show elbow plot
+```{r}
+sobject.sub.immune <- RunPCA(sobject.sub.immune,features = VariableFeatures(sobject.sub.immune),npcs = 50, verbose = FALSE)
+ElbowPlot(sobject.sub.immune,ndims = 50, reduction = "pca")
+print(sobject.sub.immune[["pca"]], dims = 1:20, nfeatures = 5)
+```
+
+Once you are satisfied with pc's, run clustering: 
+```{r}
+sobject.sub.immune<-RunUMAP(sobject.sub.immune,reduction = "pca",dims = pcs, verbose = F)
+sobject.sub.immune<-FindNeighbors(sobject.sub.immune,dims=pcs,verbose=F)
+sobject.sub.immune<-FindClusters(sobject.sub.immune,verbose=F,resolution = res)
+sobject.sub.immune$seurat_clusters = sobject.sub.immune$SCT_snn_res.0.15
+```
+
+Function to print multiple graphs: 
+```{r}
+PrintSeuratGraph = function(namecard = "a",seurat_object = sobject.sub.immune,graphtype = "feature",feature = NULL,group = NULL,split=NULL,cellnames=NULL, label=FALSE){
+  if (!is.null(cellnames)){
+    #Idents(seurat_object) = cellnames[1]
+    #cells = colnames(seurat_object)[Idents(seurat_object) %in% cellnames[1:length(cellnames)]]} 
+    cells = cellnames}
+  else {cells = cellnames}
+  if (graphtype == "feature"){
+    graph = FeaturePlot(seurat_object,features = feature,split.by = split, cells = cells,cols = c("lightyellow","darkred"))
+  }
+  if (graphtype == "violin"){
+    graph = VlnPlot(seurat_object,features = feature, pt.size = 0.1, idents = cellnames[2:length(cellnames)],group.by = group, split.by = split)
+  }
+  if (graphtype == "dim"){
+    graph = DimPlot(seurat_object,cells = cells, group.by = group, split.by = split, label = label)
+  }
+  name = paste0(feature,"_",graphtype,namecard,".eps")
+  graph
+  setEPS()
+  postscript(file.path(dir,Plotfolder,name))
+  print(graph)
+  dev.off()
+}
+```
+Save the clustered dataset. Overwrite the existing, subset dataset. 
+```{r,eval = FALSE}
+save(sobject.sub.immune,file = file.path(dir,datafolder,paste0(project,"_",iterationname,".RData")))
+```
+
+Block to print multiple graphs: 
+```{r}
+Plotfolder = "Plots/Immune Subset"
+DefaultAssay(sobject.sub.immune) = "RNA"
+
+name = paste0(project,"_",iterationname)
+genes = c("Cd3e", "Cd4", "Cd8a", "Ptprc", "Itgam", "P2ry12", "Cd9", "Fabp5", "Spp1", "Ccr2", "Mki67", "Cx3cr1", "Csf1r", "H2-Aa", "Il1b", "Tgfb1")
+groups = c("timepoint_genotype", "timepoint", "microanatomy", "immunetype", "immunetypecluster")
+#note - added immunetype, immunetypecluster from below
+genes = genes[genes %in% rownames(GetAssayData(sobject.sub.immune,slot = "data"))]
+
+for(feature in genes){
+  PrintSeuratGraph(namecard = name,graphtype = "feature",feature = feature)
+}
+
+#dim plots for clustering
+for(group in groups){
+  PrintSeuratGraph(namecard = name,graphtype = "dim",group = group, feature = group)
+}
+
+PrintSeuratGraph(namecard = name, graphtype = "dim", group = "seurat_clusters", feature = "seurat_clusters", label=T)
+PrintSeuratGraph(namecard = name, graphtype = "dim", group = "immunetype", feature = "immunetype", label=T)
+
+
+#violin plots
+for(feature in c(genes)){
+  PrintSeuratGraph(namecard = name,graphtype = "violin",feature = feature,group = "seurat_clusters")
+}
+
+#plot individual timepoint_genotype dim plots, no legends
+Plotfolder = "Plots/Immune Subset/Timepoint Dimplots"
+for(condition in levels(as.factor(sobject.sub.immune$timepoint_genotype))){
+  cells = names(which(sobject.sub.immune$timepoint_genotype == condition))
+  graph = DimPlot(sobject.sub.immune, cells = cells, group.by = "seurat_clusters", label = T) + ggplot2::theme(legend.position = "none") + ggtitle(condition) + xlim(-11,13) + ylim(-14, 13)
+  name = paste0(condition, "_dimplot.eps")
+  setEPS()
+  postscript(file.path(dir,Plotfolder,name))
+  print(graph)
+  dev.off()
+}
+```
+
+```{r}
+#Determine cluster identities
+
+Idents(sobject.sub.immune) = "seurat_clusters"
+Plotfolder = "Plots/Immune Subset/Additional Specific Genes"
+name = paste0(project,"_",iterationname)
+
+features = c("Plxdc2", "Ldlrad3", "Tbx21", "Rora", "Gata3", "Mrc1", "Zbtb46", "Tnfrsf11a", "Sall1")
+for(feature in features){
+   PrintSeuratGraph(namecard = name,graphtype = "feature",feature = feature)
+   PrintSeuratGraph(namecard = name, graphtype = "violin", feature = feature)
+}
+```
+
+```{r}
+#Edit this part carefully. You can add any number of types. Each cluster can only be one type. 
+
+type0 = c(-1)
+name0 = "DAMs"
+type1 = c(0)
+name1 = "Macrophage_Ldlrad3"
+type2 = c(1)
+name2 = "T-cells_Th1-2"
+type3 = c(2)
+name3 = "Macrophage_CD206"
+type4 = c(3)
+name4 = "Prolif"
+type5 = c(4)
+name5 = "Macrophage_ECM"
+type6 = c(5)
+name6 = "Monocytes_DCs"
+type7 = c(6)
+name7 = "Microglia"
+type8 = c(7)
+name8 = "T-cells_Th17"
+type9 = c(8)
+name9 = "DCs"
+type10 = c(9)
+name10 = "Osteoclasts"
+
+
+#Initialize the cluster levels as a vector and replace the cluster levels with the appropriate name. 
+clusters = as.factor(sobject.sub.immune$seurat_clusters)
+type = levels(clusters)
+type[type0+2] = name0
+type[type1+2] = name1
+type[type2+2] = name2
+type[type3+2] = name3
+type[type4+2] = name4
+type[type5+2] = name5
+type[type6+2] = name6
+type[type7+2] = name7
+type[type8+2] = name8
+type[type9+2] = name9
+type[type10+2] = name10
+
+levels(clusters) = type
+
+#Add a metadata column
+sobject.sub.immune$immunetype = clusters
+
+#check the celltype assignment for accuracy
+table(sobject.sub.immune$immunetype,sobject.sub.immune$seurat_clusters)
+
+#add a metadata column labelling each cluster
+sobject.sub.immune$immunetypecluster = paste0(sobject.sub.immune$immunetype,"-",sobject.sub.immune$seurat_clusters)
+Idents(sobject.sub.immune) = "immunetype"
+```
+Save the clustered dataset with fibtype labels. Overwrite the existing, clustered dataset. 
+```{r,eval = FALSE}
+save(sobject.sub.immune,file = file.path(dir,datafolder,paste0(project,"_",iterationname,".RData")))
+```
+
+
+Save the tree
+```{r}
+# Idents(sobject.sub.fib) = column
+Idents(sobject.sub.immune) = "seurat_clusters"
+sobject.sub.immune= BuildClusterTree(sobject.sub.immune,dims = pcs)
+tree = sobject.sub.immune@tools$BuildClusterTree
+setEPS()
+postscript(file.path(dir,"Trees",paste0(project,"_",iterationname,"_tree.eps")))
+plot.phylo(tree, use.edge.length = T, direction = "rightwards")
+dev.off()
+```
+
+***Add DAM module score***
+```{r}
+#code from Nick: "/Users/nathanewing-crystal/Dropbox (Ari Molofsky Lab)/Ari Molofsky Lab Team Folder/Nick Mroz/scRNAseq_R5 ST2Flox 14dpi/cortex scRNAseq/DAM Paper Gene Lists/DAMgenes.R"
+
+##set folder and file names
+DAMfolder = "/Users/nathanewing-crystal/Dropbox (Ari Molofsky Lab)/Ari Molofsky Lab Team Folder/Nick Mroz/scRNAseq_R5 ST2Flox 14dpi/cortex scRNAseq/DAM Paper Gene Lists"
+DAMgenesfile = "Keren-Shaul_Cell_2017_DAM DEGs.csv"
+Plotfolder = "Plots/Immune Subset/module score"
+
+##load in csv of DAM genes
+DAMgenes = read.csv(file.path(DAMfolder,DAMgenesfile),stringsAsFactors = F)
+homeostatic_microgliagenes = read.csv(file.path(DAMfolder,DAMgenesfile),stringsAsFactors = F)
+
+#Select only the genes that pass pval threshold. Note that this spreadsheet has -log10(pval)
+DAMgenes = DAMgenes[DAMgenes$X.log10.DAM..p.value..Mann.Whitney. > 3,]
+homeostatic_microgliagenes = homeostatic_microgliagenes[homeostatic_microgliagenes$X.log10.DAM..p.value..Mann.Whitney. > 3,]
+
+#Select only positive logFCs
+DAMgenes = DAMgenes[DAMgenes$Fold.change..DAM.to.homeostatic.microglia. > 0,]
+homeostatic_microgliagenes = homeostatic_microgliagenes[homeostatic_microgliagenes$Fold.change..DAM.to.homeostatic.microglia. < 0,]
+
+
+#Select top 30 genes based on logFC
+topDAMgenes <- DAMgenes %>% top_n(30, Fold.change..DAM.to.homeostatic.microglia.) #only top 30 genes
+topDAMgenes = topDAMgenes[order(topDAMgenes$Fold.change..DAM.to.homeostatic.microglia., decreasing = T),]
+topDAMgenes = topDAMgenes$Gene.name
+
+tophomeostaticgenes <- homeostatic_microgliagenes %>% top_n(30, abs(Fold.change..DAM.to.homeostatic.microglia.)) #only top 30 genes (take absolute value of FC because homeostatic genes will be negative)
+tophomeostaticgenes = tophomeostaticgenes[order(tophomeostaticgenes$Fold.change..DAM.to.homeostatic.microglia., decreasing = F),]
+tophomeostaticgenes = tophomeostaticgenes$Gene.name
+
+#Note - not running below code
+
+#topDAMgenes[!topDAMgenes %in% VariableFeatures(vobj.merge.sub10)] #check if any genes are not in VariableFeatures(sobject)
+#topDAMgenes = topDAMgenes[c(1,3:6,8,10:13,15:19,21:30)] #removed genes that are not in VariableFeature(sobject)
+
+##Module Feature Score
+#convert topDAMgenes into a list with length=1
+topDAMgeneslist = list()
+topDAMgeneslist[[1]] = topDAMgenes
+
+sobject.sub.immune <- AddModuleScore(
+  sobject.sub.immune,
+  topDAMgeneslist,
+  pool = NULL,
+  nbin = 24,
+  ctrl = 100,
+  name = "DAM_score",
+  seed = 1,
+  search = TRUE,
+)
+#note - added as "DAM_score1"
+
+tophomeostaticgeneslist = list()
+tophomeostaticgeneslist[[1]] = tophomeostaticgenes
+
+sobject.sub.immune <- AddModuleScore(
+  sobject.sub.immune,
+  tophomeostaticgeneslist,
+  pool = NULL,
+  nbin = 24,
+  ctrl = 100,
+  name = "homeostatic_MG_score",
+  seed = 1,
+  search = TRUE,
+)
+#note - added as "homeostatic_MG_score1"
+
+name = paste0(project,"_",iterationname)
+
+Idents(sobject.sub.immune) = "immunetype"
+features = c("DAM_score1", "homeostatic_MG_score1")
+for(feature in features){
+   PrintSeuratGraph(namecard = name,graphtype = "feature",feature = feature)
+   PrintSeuratGraph(namecard = name, graphtype = "violin", feature = feature)
+}
+```
+
+*Note: already scaled/normalized (before subsetting, in 2_Processing.Rmd)*
+
+*Heatmap*
+
+First calculate DE genes for every cluster (with meninges)
+```{r,results = "hide",eval = FALSE}
+Idents(sobject.sub.immune) = column
+markers_all <- FindAllMarkers(
+    object = sobject.sub.immune,
+    assay = "RNA",  ##Edited to do DEG analysis on RNA counts, not SCT transformed data
+    features = rownames(sobject),
+    test.use = "MAST",
+    only.pos = FALSE, 
+    min.pct = 0.05, 
+    logfc.threshold = 0.2
+)
+write.csv(markers_all,file = file.path(dir,"Spreadsheets",paste0(project, "_", iterationname, "_all_markers.csv")))
+```
+
+
+Make the heatmap
+```{r}
+#read in a de gene file
+
+#performed on Presidio, then resaved with new iterrationname
+markers = read.csv(file.path(dir,"Spreadsheets",paste0(project, "_", iterationname, "_all_markers.csv")),stringsAsFactors = F)
+
+#Select only the genes that pass thresholds
+markers = markers[markers$p_val_adj<pval,]
+
+#pick only positives, or restrict by min/max pct expression using pct1/2
+markers = markers[markers$avg_log2FC > lfc,] #make log2FC >0.2 for heatmaps, >0 for volcano plots
+markers = markers[markers$pct.1 > minpct & markers$pct.2 < maxpct,]
+
+#If you want, select markers that define a single cluster
+if (single){markers <- markers[markers$gene %in% names(table(markers$gene))[table(markers$gene) == 1],] }
+
+table(markers$cluster)
+
+topgenes <- markers %>% group_by(cluster) %>% top_n(10, avg_log2FC) #top 10 genes
+topgenes = topgenes[order(topgenes$cluster),]
+
+#Subset each cluster to ncells
+cellnames = sobject.sub.immune@meta.data[,column]
+names(cellnames) = colnames(sobject.sub.immune)
+clusters = levels(as.factor(cellnames))
+newcellnames = NULL
+for (cluster in clusters){
+  n = length(cellnames[cellnames == cluster])
+  if (n > ncells){n = ncells}
+  newcluster = sample(cellnames[cellnames == cluster],n, replace = F)
+  newcellnames = c(newcellnames,newcluster)
+}
+
+#check
+table(newcellnames)
+
+#Make heatmap
+setEPS()
+postscript(file.path(dir,"Heatmaps", paste0(project,"_",iterationname, "_", column,"_",pval,"_ncells",ncells,"heatmap.eps")))
+DoHeatmap(
+    object = sobject.sub.immune, 
+    features = c(topgenes$gene),
+    cells = names(newcellnames),
+    group.by = column,
+    size = 4,
+    label = T,
+    draw.lines = T,
+    raster = FALSE
+) + theme(axis.text.y = element_text(size = 4))
+
+dev.off()
+```
+
+Print heatmap to console
+
+```{r}
+DoHeatmap(
+    object = sobject.sub.fib, 
+    features = c(topgenes$gene),
+    cells = names(newcellnames),
+    group.by = column,
+    size = 5,
+    label = T,
+    draw.lines = T
+)
+```
+
+```{r}
+Idents(sobject.sub.immune) = "immunetype"
+clusters_to_keep = c("DAMs", "Macrophage_Ldlrad3", "Macrophage_CD206", "Macrophage_ECM", "Monocytes_DCs", "Microglia")
+
+sobject.sub.mac = subset(sobject.sub.immune, idents = clusters_to_keep)
+```
+
+```{r,eval = FALSE}
+save(sobject.sub.mac,file = file.path(dir,datafolder,paste0(project,"_",iterationname,"_mac.RData")))
+```
+
+***~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~***
+Timecourse: compare 7 vs. 21dpi timepoints for
+-all mac clusters together
+-clusters individually
+***~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~***
+```{r}
+Plotfolder = "Plots/Immune Subset/Volcano"
+groups = c("NULL", "0", "1", "3", "5", "6", "7")
+clusters = levels(as.factor(sobject.sub.mac$immunetypecluster))
+#manual assignment
+group_names=c("all", clusters[1], clusters[4], clusters[2], clusters[3], clusters[6], clusters[5])
+Idents(sobject.sub.mac) = "seurat_clusters"
+for(group in groups){
+  group_name = group_names[which(groups == group)]
+  print(paste0("Finding markers for: ", group_name))
+  markers = FindMarkers(
+    sobject.sub.mac,
+    group.by = "timepoint",
+    ident.1 = "21dpi",
+    ident.2 = "7dpi",
+    subset.ident = if(group_name == "all"){NULL} else{group}) #either cluster of interest or all clusters together
+  
+  write.csv(markers,file = file.path(dir,"Spreadsheets/Immune Timecourse",paste0(project, "_", iterationname, "_cluster-", group_name, "_7-vs-21dpi_markers.csv")))
+  
+  #volcano plot
+  
+  #Minimum fold change (i.e. 1.15 = 15% increase)
+  minfc = 1.15
+  #Max adj. p value
+  alpha = 0.05
+  #Genes to highlight
+  ngenes = 50
+  
+  defile = paste0(project, "_", iterationname, "_cluster-", group_name, "_7-vs-21dpi_markers.csv")
+  
+  #Comparison being made (must match file names)
+  comparison = paste0(project, "_", iterationname, "_cluster-", group_name, "_7-vs-21dpi_markers")
+
+  newlist=list(de)
+  de = read.csv(file.path(dir,"Spreadsheets/Immune Timecourse", defile),stringsAsFactors = F) #any   spreadsheet with gene symbols or other identifiers
+  colnames(de)[1] = "Gene"
+
+  #NOTE: generated from "DEG_analysis" script
+  fc = de
+  fc = fc[!is.na(fc$avg_log2FC),]
+  colorkeysdown = fc$Gene[fc$avg_log2FC < -log2(minfc) & fc$p_val_adj < alpha]
+  colorkeysup = fc$Gene[fc$avg_log2FC > log2(minfc) & fc$p_val_adj < alpha]
+  
+  #Either highlight specific genes or pick the top genes in colorkeysup/down
+  top = fc[fc$p_val_adj<alpha,]
+  top = top[order(top$avg_log2FC),"Gene"]
+  highlight_top = c(head(top,ngenes),tail(top,ngenes))
+  size_labels = 2
+
+  allcolors = rep("darkgrey",length(fc$Gene))
+  names(allcolors) = fc$Gene
+  allcolors[names(allcolors) %in% colorkeysdown] = "red"
+  allcolors[names(allcolors) %in% colorkeysup]= "blue"
+  # names(allcolors)[allcolors == "yellow"] = "labelled"
+  names(allcolors)[allcolors == "blue"] = "Late (21dpi)"
+  names(allcolors)[allcolors == "darkgrey"] = "-"
+  names(allcolors)[allcolors == "red"] = "Early (7dpi)"
+    
+  #manual label
+  clustername = (if(group_name == "all"){} else{paste0("(cluster ", group_name, ") ")})
+  name = paste0("Macs ", clustername, "7 vs. 21dpi")
+  range = max(max(fc$avg_log2FC), min(fc$avg_log2FC))
+  if(is.infinite(range)){range = 150}
+
+    setEPS()
+    postscript(file.path(dir, Plotfolder, paste0("Volcano_",comparison, ".eps")))
+    print(EnhancedVolcano(fc,
+                lab = fc$Gene,
+                x = 'avg_log2FC',
+                y = 'p_val_adj',
+                xlim = c(-range, range),
+                title = name,
+                drawConnectors = T,
+                arrowheads = F,
+                legendPosition = 'bottom',
+                pCutoff = alpha,
+                FCcutoff = log2(minfc),
+                selectLab = highlight_top,
+                labSize = size_labels,
+                pointSize = 0.5,
+                col=c('black', 'black', 'black', 'red3'),
+                colCustom = allcolors,
+                gridlines.major = F,
+                gridlines.minor = F,
+                colAlpha = 1,
+                max.overlaps = 50))
+     dev.off()
+}
+```
+
+#add module scores to sobject.sub.mac to look for SAMs
+```{r}
+#Spp1 mac score from Hoeft et al
+# https://www.ncbi.nlm.nih.gov/pmc/articles/PMC9992450/
+features_spp1_mac = read.csv(file.path(dir,"Data/Other/Hoeft et al/spp1_mac.csv"),stringsAsFactors = F) 
+
+#Fab5 score from Fabre et al
+# https://www.science.org/doi/10.1126/sciimmunol.add8945
+#TREM2, CD9, SPP1, GPNMB, FABP5
+features_fab5 = list(c("Trem2", "Cd9", "Spp1", "Gpnmb", "Fabp5", "Cd63"))
+
+sobject.sub.mac <- AddModuleScore(
+  sobject.sub.mac,
+  features_spp1_mac,
+  pool = NULL,
+  nbin = 24,
+  ctrl = 100,
+  name = "spp1_mac_score",
+  seed = 1,
+  search = TRUE,
+)
+#note - added as "spp1_mac_score1"
+
+sobject.sub.mac <- AddModuleScore(
+  sobject.sub.mac,
+  features_fab5,
+  pool = NULL,
+  nbin = 24,
+  ctrl = 100,
+  name = "fab5_score",
+  seed = 1,
+  search = TRUE,
+)
+#note - added as "fab5_score1"
+
+Idents(sobject.sub.mac) = "immunetype"
+Plotfolder = "Plots/Immune Subset/module score/myeloid"
+features = c("spp1_mac_score1", "fab5_score1", "DAM_score1")
+for(feature in features){
+  name = paste0(project, iterationname, "_", feature)
+   PrintSeuratGraph(seurat_object = sobject.sub.mac, namecard = name,graphtype = "feature",feature = feature)
+   PrintSeuratGraph(seurat_object = sobject.sub.mac, namecard = name, graphtype = "violin", feature = feature)
+}
+
+Idents(sobject.sub.mac) = "immunetype"
+p1 = VlnPlot(sobject.sub.mac, features = "fab5_score1", group.by = "timepoint", idents = "Macrophage_Ldlrad3")
+p1$data$ident <- factor(x = p1$data$ident, levels = c("Rest", "2dpi", "7dpi", "21dpi"))
+name = paste0(project, iterationname, "_Fab5_score1_Ldlrad3.eps")
+
+setEPS()
+postscript(file.path(dir,Plotfolder,name))
+print(p1)
+dev.off()
+
+Idents(sobject.sub.mac) = "immunetype"
+p1 = VlnPlot(sobject.sub.mac, features = "fab5_score1", group.by = "timepoint", idents = "DAMs")
+p1$data$ident <- factor(x = p1$data$ident, levels = c("Rest", "2dpi", "7dpi", "21dpi"))
+name = paste0(project, iterationname, "_Fab5_score1_DAMs.eps")
+
+setEPS()
+postscript(file.path(dir,Plotfolder,name))
+print(p1)
+dev.off()
+
+p1 = DimPlot(sobject.sub.mac, group.by = "timepoint")
+name = paste0(project, iterationname, "_", "timepoint.eps")
+
+setEPS()
+postscript(file.path(dir,Plotfolder,name))
+print(p1)
+dev.off()
+```
+
+***~~~~~~~~~~~~~~~~~~~~Nebulosa plots~~~~~~~~~~~~~~~~~~~~~~~~***
+```{r}
+Plotfolder = "Plots/Immune Subset/Nebulosa"
+fab5 = c("Trem2", "Cd9", "Spp1", "Gpnmb", "Fabp5", "Cd63")
+name = paste0(project, "_", iterationname, "_fab5_nebulosa.eps")
+p1 = plot_density(sobject.sub.mac, fab5, joint=T)
+  
+setEPS()
+postscript(file.path(dir,Plotfolder,name), width = 8)
+print(p1)
+dev.off()
+```
+
+
+***~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~***
+Timecourse: compare 7 vs. 21dpi timepoints for
+-all T clusters together
+-clusters individually
+***~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~***
+```{r}
+Plotfolder = "Plots/Immune Subset/Volcano"
+Idents(sobject.sub.immune) = "immunetype"
+sobject.sub.t = subset(sobject.sub.immune, idents=c("T-cells_Th1-2", "T-cells_Th17"))
+
+groups = c("NULL", "2", "8")
+clusters = levels(as.factor(sobject.sub.t$immunetypecluster))
+#manual assignment
+group_names=c("all_T", clusters[1], clusters[2])
+Idents(sobject.sub.t) = "seurat_clusters"
+for(group in groups){
+  group_name = group_names[which(groups == group)]
+  print(paste0("Finding markers for: ", group_name))
+  markers = FindMarkers(
+    sobject.sub.t,
+    group.by = "timepoint",
+    ident.1 = "21dpi",
+    ident.2 = "7dpi",
+    subset.ident = if(group_name == "all_T"){NULL} else{group}) #either cluster of interest or all clusters together
+  
+  write.csv(markers,file = file.path(dir,"Spreadsheets/Immune Timecourse",paste0(project, "_", iterationname, "_cluster-", group_name, "_7-vs-21dpi_markers.csv")))
+  
+  #volcano plot
+  
+  #Minimum fold change (i.e. 1.15 = 15% increase)
+  minfc = 1.15
+  #Max adj. p value
+  alpha = 0.05
+  #Genes to highlight
+  ngenes = 50
+  
+  defile = paste0(project, "_", iterationname, "_cluster-", group_name, "_7-vs-21dpi_markers.csv")
+  
+  #Comparison being made (must match file names)
+  comparison = paste0(project, "_", iterationname, "_cluster-", group_name, "_7-vs-21dpi_markers")
+
+  newlist=list(de)
+  de = read.csv(file.path(dir,"Spreadsheets/Immune Timecourse", defile),stringsAsFactors = F) #any   spreadsheet with gene symbols or other identifiers
+  colnames(de)[1] = "Gene"
+
+  #NOTE: generated from "DEG_analysis" script
+  fc = de
+  fc = fc[!is.na(fc$avg_log2FC),]
+  colorkeysdown = fc$Gene[fc$avg_log2FC < -log2(minfc) & fc$p_val_adj < alpha]
+  colorkeysup = fc$Gene[fc$avg_log2FC > log2(minfc) & fc$p_val_adj < alpha]
+  
+  #Either highlight specific genes or pick the top genes in colorkeysup/down
+  top = fc[fc$p_val_adj<alpha,]
+  top = top[order(top$avg_log2FC),"Gene"]
+  highlight_top = c(head(top,ngenes),tail(top,ngenes))
+  size_labels = 2
+
+  allcolors = rep("darkgrey",length(fc$Gene))
+  names(allcolors) = fc$Gene
+  allcolors[names(allcolors) %in% colorkeysdown] = "red"
+  allcolors[names(allcolors) %in% colorkeysup]= "blue"
+  # names(allcolors)[allcolors == "yellow"] = "labelled"
+  names(allcolors)[allcolors == "blue"] = "Late (21dpi)"
+  names(allcolors)[allcolors == "darkgrey"] = "-"
+  names(allcolors)[allcolors == "red"] = "Early (7dpi)"
+    
+  #manual label
+  clustername = (if(group_name == "all_T"){"T-Cells"} else{group_name})
+  name = paste0(clustername, ": 7 vs. 21dpi")
+  range = max(max(fc$avg_log2FC), min(fc$avg_log2FC))
+  if(is.infinite(range)){range = 150}
+
+    setEPS()
+    postscript(file.path(dir, Plotfolder, paste0("Volcano_",comparison, ".eps")))
+    print(EnhancedVolcano(fc,
+                lab = fc$Gene,
+                x = 'avg_log2FC',
+                y = 'p_val_adj',
+                xlim = c(-range, range),
+                title = name,
+                drawConnectors = T,
+                arrowheads = F,
+                legendPosition = 'bottom',
+                pCutoff = alpha,
+                FCcutoff = log2(minfc),
+                selectLab = highlight_top,
+                labSize = size_labels,
+                pointSize = 0.5,
+                col=c('black', 'black', 'black', 'red3'),
+                colCustom = allcolors,
+                gridlines.major = F,
+                gridlines.minor = F,
+                colAlpha = 1,
+                max.overlaps = 50))
+     dev.off()
+}
+
+Plotfolder = "Plots/Immune Subset/T"
+name = paste0(project, iterationname, "_T_timecourse.eps")
+setEPS()
+postscript(file.path(dir,Plotfolder,name))
+DimPlot(sobject.sub.t, group.by = "timepoint")
+dev.off()
+
+name = paste0(project, iterationname, "_T_microanatomy.eps")
+setEPS()
+postscript(file.path(dir,Plotfolder,name))
+DimPlot(sobject.sub.t, group.by = "microanatomy")
+dev.off()
+
+name = paste0(project, iterationname, "_T.eps")
+setEPS()
+postscript(file.path(dir,Plotfolder,name))
+DimPlot(sobject.sub.t, group.by = "immunetype")
+dev.off()
+```
+***~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~***
+TGFb: compare Col1a2 cKO vs. WT (vs. Cdh5cre?) immune cells for
+-allclusters together
+-each immune cluster individually
+***~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~***
+```{r}
+Idents(sobject.sub.immune) = "timepoint"
+sobject.sub.immune.7dpi = subset(sobject.sub.immune, idents = "7dpi")
+
+save(sobject.sub.immune.7dpi,file = file.path(dir,datafolder,paste0(project,"_",iterationname,"_7dpi.RData")))
+
+Plotfolder = "Plots/Immune Subset/Volcano"
+groups = c("NULL", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10")
+clusters = levels(as.factor(sobject.sub.immune.7dpi$immunetypecluster))
+#manual assignment
+group_names=c("all", clusters[1], clusters[5], clusters[10], clusters[3], clusters[9], clusters[4], clusters[7], clusters[6], clusters[11], clusters[2], clusters[8])
+Idents(sobject.sub.immune.7dpi) = "seurat_clusters"
+for(group in groups){
+  group_name = group_names[which(groups == group)]
+  print(paste0("Finding markers for: ", group_name))
+  
+  #Some groups have fewer than 3; manual fix
+  if(group_name == "all"){numingroup = 10000} else {numingroup = sobject.sub.immune.7dpi[,(sobject.sub.immune.7dpi$genotype == "Col1a2creER Tgfbr2flox")]
+  numingroup = numingroup[,(numingroup$immunetypecluster == group_name)]
+  numingroup = length(colnames(numingroup))   }
+  if(numingroup < 3){print(paste0("skipping ", group_name))} else{
+  markers = FindMarkers(
+    sobject.sub.immune.7dpi,
+    group.by = "genotype",
+    ident.1 = "Col1a2creER Tgfbr2flox",
+    ident.2 = "WT",
+    subset.ident = if(group_name == "all"){NULL} else{group}) #either cluster of interest or all clusters together
+  
+  write.csv(markers,file = file.path(dir,"Spreadsheets/7dpi WT vs cKO/Immune",paste0(project, "_", iterationname, "_cluster-", group_name, "_wt-vs-col1a2-cKO_markers.csv")))
+  
+  #volcano plot
+  
+  #Minimum fold change (i.e. 1.15 = 15% increase)
+  minfc = 1.15
+  #Max adj. p value
+  alpha = 0.05
+  #Genes to highlight
+  ngenes = 50
+  
+  defile = paste0(project, "_", iterationname, "_cluster-", group_name, "_wt-vs-col1a2-cKO_markers.csv")
+  
+  #Comparison being made (must match file names)
+  comparison = paste0(project, "_", iterationname, "_cluster-", group_name, "_wt-vs-col1a2-cKO_markers")
+
+  newlist=list(de)
+  de = read.csv(file.path(dir,"Spreadsheets/7dpi WT vs cKO/Immune", defile),stringsAsFactors = F) #any   spreadsheet with gene symbols or other identifiers
+  colnames(de)[1] = "Gene"
+
+  #NOTE: generated from "DEG_analysis" script
+  fc = de
+  fc = fc[!is.na(fc$avg_log2FC),]
+  colorkeysdown = fc$Gene[fc$avg_log2FC < -log2(minfc) & fc$p_val_adj < alpha]
+  colorkeysup = fc$Gene[fc$avg_log2FC > log2(minfc) & fc$p_val_adj < alpha]
+  
+  #Either highlight specific genes or pick the top genes in colorkeysup/down
+  top = fc[fc$p_val_adj<alpha,]
+  top = top[order(top$avg_log2FC),"Gene"]
+  highlight_top = c(head(top,ngenes),tail(top,ngenes))
+  #add other genelists if desired
+  #highlight_immune = c()
+  #highlight_immune = highlight_immune[highlight_immune %in% c(colorkeysup, colorkeysdown)]
+  genelists = list(highlight_top)
+  names_genelists = c("top")
+  size_labels = c(2)
+
+  allcolors = rep("darkgrey",length(fc$Gene))
+  names(allcolors) = fc$Gene
+  allcolors[names(allcolors) %in% colorkeysdown] = "red"
+  allcolors[names(allcolors) %in% colorkeysup]= "blue"
+  # names(allcolors)[allcolors == "yellow"] = "labelled"
+  names(allcolors)[allcolors == "blue"] = "Col1a2cre Tgfbr2flox"
+  names(allcolors)[allcolors == "darkgrey"] = "-"
+  names(allcolors)[allcolors == "red"] = " WT" #space for alphabetizing
+    
+  #manual label
+  clustername = (if(group_name == "all"){} else{paste0("(cluster ", group_name, ") ")})
+  name = paste0("Immune Cells ", clustername, "7dpi WT vs. Col1a2 cKO")
+  range = max(max(fc$avg_log2FC), min(fc$avg_log2FC))
+  if(is.infinite(range)){range = 150}
+
+  for(i in 1:length(names_genelists)){
+    setEPS()
+    postscript(file.path(dir, Plotfolder, names_genelists[i], paste0("Volcano_",comparison,"_", names_genelists[i], ".eps")))
+    print(EnhancedVolcano(fc,
+                lab = fc$Gene,
+                x = 'avg_log2FC',
+                y = 'p_val_adj',
+                xlim = c(-range, range),
+                title = name,
+                drawConnectors = T,
+                arrowheads = F,
+                legendPosition = 'bottom',
+                pCutoff = alpha,
+                FCcutoff = log2(minfc),
+                selectLab = genelists[[i]],
+                labSize = size_labels[i],
+                pointSize = 0.5,
+                col=c('black', 'black', 'black', 'red3'),
+                colCustom = allcolors,
+                gridlines.major = F,
+                gridlines.minor = F,
+                colAlpha = 1,
+                max.overlaps = 50))
+     dev.off()
+  }} #end "numingroup if statement"
+}
+```
+#For figure
+```{r}
+Plotfolder = "Plots/figure"
+Idents(sobject.sub.mac) = "genotype"
+sobject.sub.mac.wt = subset(sobject.sub.mac, ident = "WT")
+Idents(sobject.sub.mac.wt) = "immunetype"
+setEPS()
+postscript(file.path(dir,Plotfolder, paste0(project, iterationname, "mac_dim_label.eps")), width = 6, height = 5)
+DimPlot(sobject.sub.mac.wt, label = T, repel = T, label.size = 4)
+dev.off()
+
+setEPS()
+postscript(file.path(dir,Plotfolder, paste0(project, iterationname, "tgfb_density.eps")), width = 4, height = 4)
+plot_density(sobject.sub.mac.wt, "Tgfb1")
+dev.off()
+
+setEPS()
+postscript(file.path(dir,Plotfolder, paste0(project, iterationname, "dam_score.eps")), height = 5, width = 4)
+VlnPlot(sobject.sub.mac.wt, "DAM_score1") + NoLegend()
+dev.off()
+
+setEPS()
+postscript(file.path(dir,Plotfolder, paste0(project, iterationname, "fab5_score.eps")), height = 4.5, width = 4)
+VlnPlot(sobject.sub.mac.wt, "fab5_score1") + NoLegend()
+dev.off()
+
+setEPS()
+postscript(file.path(dir,Plotfolder, paste0(project, iterationname, "_fab5_density.eps")), height = 5, width = 4)
+FeaturePlot(sobject.sub.mac.wt, "fab5_score1")
+dev.off()
+
+setEPS()
+postscript(file.path(dir,Plotfolder, paste0(project, iterationname, "mac_timepoint.eps")), height = 5.5, width = 5)
+DimPlot(sobject.sub.mac.wt, group.by = "timepoint", order = "Rest", cols = c("#F8766D", "#00BFC4", "#DFAF37", "#C77CFF")) #plot rest last (rare)
+dev.off()
+
+Idents(sobject.sub.mac.wt) = "immunetype"
+p1 = VlnPlot(subset(sobject.sub.mac.wt, subset = timepoint == c("7dpi", "21dpi")), features = "fab5_score1", idents = c("DAMs", "Macrophage_Ldlrad3"), split.by = "timepoint", split.plot=T)
+p1$data$split <- factor(x = p1$data$split, levels = c("7dpi", "21dpi"))
+
+Idents(sobject.sub.mac.wt) = "timepoint"
+s2 = subset(sobject.sub.mac.wt, subset = immunetype == c("DAMs", "Macrophage_Ldlrad3"))
+corrected_immunetype = as.matrix(s2$immunetype)
+s2$immunetype = corrected_immunetype
+p2 = VlnPlot(s2, features = "fab5_score1", idents = c("7dpi", "21dpi"), split.by = "immunetype", split.plot=T)
+setEPS()
+postscript(file.path(dir,Plotfolder, paste0(project, iterationname, "fab5_timecourse.eps")), height = 4.5, width = 3)
+p1
+dev.off()
+
+setEPS()
+postscript(file.path(dir,Plotfolder, paste0(project, iterationname, "fab5_timecourse_LEGEND.eps")), height = 10, width = 6)
+p1
+dev.off()
+```
+#figure continued
+```{r}
+markers_wt <- FindAllMarkers(
+    object = sobject.sub.mac.wt,
+    assay = "RNA",  ##Edited to do DEG analysis on RNA counts, not SCT transformed data
+    features = rownames(sobject.sub.mac.wt),
+    test.use = "MAST",
+    only.pos = FALSE, 
+    min.pct = 0.05, 
+    logfc.threshold = 0.2
+)
+
+write.csv(markers_wt,file = file.path(dir,"Spreadsheets",paste0(project, "_", iterationname, "_mac_markers_wt.csv")))
+
+#Select only the genes that pass thresholds
+markers = markers_wt[markers_wt$p_val_adj<pval,]
+
+#pick only positives, or restrict by min/max pct expression using pct1/2
+markers = markers[markers$avg_log2FC > lfc,] #make log2FC >0.2 for heatmaps, >0 for volcano plots
+markers = markers[markers$pct.1 > minpct & markers$pct.2 < maxpct,]
+
+table(markers$cluster)
+
+#dotplot for figure
+topgenes <- markers %>% group_by(cluster) %>% top_n(3, avg_log2FC) #top 10 genes
+topgenes = topgenes[order(topgenes$cluster),]
+
+setEPS()
+postscript(file.path(dir,"DotPlots", paste0(project,"_",iterationname,"_","mac_dotplot.eps")), width = 8, height = 3.1)
+DotPlot(sobject.sub.mac.wt, assay = "RNA", features = unique(c(topgenes$gene)), cols = "RdBu") + theme(axis.text.x = element_text(angle = 90, hjust = 0.95))
+dev.off()
+```
+```{r}
+DimPlot(sobject.sub.mac, group.by = "immunetype", label=F)
+FeaturePlot(sobject.sub.mac, "Ptprc")
+```
+
+

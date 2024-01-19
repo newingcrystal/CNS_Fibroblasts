@@ -1,0 +1,478 @@
+---
+title: "12_astrocyte_subset"
+output: html_document
+date: "2023-06-03"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+library(ape)
+library(cowplot)
+library(Matrix)
+library(MAST)
+#install.packages('EnhancedVolcano')
+library(EnhancedVolcano)
+
+
+#BiocManager::install("goseq")
+library(goseq)
+#BiocManager::install("TxDb.Mmusculus.UCSC.mm10.ensGene")
+library(TxDb.Mmusculus.UCSC.mm10.ensGene)
+#BiocManager::install("org.Mm.eg.db")
+library(org.Mm.eg.db)
+#BiocManager::install("clusterProfiler")
+library(clusterProfiler)
+```
+
+#Load astrocyte seurat object
+```{r}
+load(file.choose())
+```
+
+```{r}
+#Specify your preferred directory for all input + output
+dir = "/Users/nathanewing-crystal/Ari Molofsky Lab Dropbox/Ari Molofsky Lab Team Folder/Nathan Ewing-Crystal/RNASeq/Lesion snRNASeq/seurat"
+#Specify exactly where your seurat files live
+datafolder = "Data/Seurat/Astrocyte Subset"
+
+project<-"lesion_snRNASeq" 
+
+#set up folders
+QCfolder = "QC"
+Plotfolder = "Plots/Astrocyte Subset"
+
+#Decide whether to use SCtransform (can take a long time with big datasets; generally recommended)
+sct = TRUE
+
+#You can add in housekeeping genes if you want them to be scaled always; otherwise set to "NULL"
+add.genes = NULL
+
+#How many genes do you want scaled to use for UMAP/clustering? 
+ngenes = 6000
+
+#Which principal components do you want to calculate on? This is a default setting, change if one of the pc's is for something you think is a technical error (i.e. HSP, RP, etc)
+pcs = c(1:30)
+
+#Choose what to regress out - could be age, sex, or any metadata column
+regress = c("nCount_RNA","percent.mito")
+
+#clustering resolution; the last number will be saved as "seurat_clusters" in metadata
+res = c(0.2, 0.1, 0.125, 0.075, 0.05)
+
+#metadata dimensions you want to cluster on
+dims = c("seurat_clusters","sample", "subsample", "timepoint","genotype", "microanatomy")
+
+#make a unique name; maybe this is the celltype you've already subset, or the age you're looking at, etc.
+iterationname = "astrocyte_reclustered"
+
+#Establish cutoffs for heatmaps
+pval = 1e-3 #max p-value for significance
+lfc = 0.2 #minimum log fold change
+minpct = 0.05 #if you want to subset by percent cells in that cluster expressing the gene
+maxpct = 1
+single = F #should each gene be a marker of a single cluster only
+hgenes = 3 #how many genes should be in the heatmap per cluster
+ncells = 100 #max # of cells per heatmap column
+column = "seurat_clusters" #division you care about
+```
+
+Find variable features, normalize, scale, run PCA, clustering, umap
+The following is the standard method of normalization and scaling. Interchangeable with the next chunk. Run both, you should have already specified which to use with "sct = T or F". Will take 5-20 minutes to run. 
+```{r,results = 'hide',eval = FALSE}
+if (!sct){
+  sobject.sub.astro <- NormalizeData(sobject.sub.astro,normalization.method = "LogNormalize", scale.factor = 10000)
+  sobject.sub.astro<-FindVariableFeatures(sobject.sub.astro, selection.method = "vst", nfeatures = ngenes)
+  
+  all.genes<-rownames(sobject.sub.astro)
+  var.genes = VariableFeatures(sobject.sub.astro)
+  add.genes = add.genes[!add.genes %in% var.genes]
+  
+  any(add.genes %in% var.genes)
+  scalegenes = c(var.genes,add.genes)
+  VariableFeatures(sobject.sub.astro) = scalegenes
+  sobject.sub.astro<-ScaleData(sobject.sub.astro,features = VariableFeatures(sobject.sub.astro), vars.to.regress = regress)
+}
+```
+
+Alternative: SCTransform (great for smaller datasets)
+```{r, results='hide',eval = FALSE}
+if (sct){
+  sobject.sub.astro <- SCTransform(sobject.sub.astro, vars.to.regress = regress, verbose = FALSE,variable.features.n = ngenes,conserve.memory = T)
+}
+```
+
+Show most variable genes
+```{r}
+labels <- c(head(VariableFeatures(sobject.sub.astro),10),add.genes)
+plot1 = VariableFeaturePlot(sobject.sub.astro)
+LabelPoints(plot=plot1, points = labels, repel = F, xnudge = 0.1, ynudge = 0.5)
+```
+
+Run PCA analysis and show elbow plot
+```{r}
+sobject.sub.astro <- RunPCA(sobject.sub.astro,features = VariableFeatures(sobject.sub.astro),npcs = 50, verbose = FALSE)
+ElbowPlot(sobject.sub.astro,ndims = 50, reduction = "pca")
+print(sobject.sub.astro[["pca"]], dims = 1:20, nfeatures = 5)
+```
+
+Once you are satisfied with pc's, run clustering: 
+```{r}
+sobject.sub.astro<-RunUMAP(sobject.sub.astro,reduction = "pca",dims = pcs, verbose = F)
+sobject.sub.astro<-FindNeighbors(sobject.sub.astro,dims=pcs,verbose=F)
+sobject.sub.astro<-FindClusters(sobject.sub.astro,verbose=F,resolution = res)
+sobject.sub.astro$seurat_clusters = sobject.sub.astro$SCT_snn_res.0.125
+```
+
+Function to print multiple graphs: 
+```{r}
+PrintSeuratGraph = function(namecard = "a",seurat_object = sobject.sub.astro,graphtype = "feature",feature = NULL,group = NULL,split=NULL,cellnames=NULL, label=FALSE){
+  if (!is.null(cellnames)){
+    #Idents(seurat_object) = cellnames[1]
+    #cells = colnames(seurat_object)[Idents(seurat_object) %in% cellnames[1:length(cellnames)]]} 
+    cells = cellnames}
+  else {cells = cellnames}
+  if (graphtype == "feature"){
+    graph = FeaturePlot(seurat_object,features = feature,split.by = split, cells = cells,cols = c("lightyellow","darkred"))
+  }
+  if (graphtype == "violin"){
+    graph = VlnPlot(seurat_object,features = feature, pt.size = 0.1, idents = cellnames[2:length(cellnames)],group.by = group, split.by = split)
+  }
+  if (graphtype == "dim"){
+    graph = DimPlot(seurat_object,cells = cells, group.by = group, split.by = split, label = label)
+  }
+  name = paste0(feature,"_",graphtype,namecard,".eps")
+  graph
+  setEPS()
+  postscript(file.path(dir,Plotfolder,name))
+  print(graph)
+  dev.off()
+}
+```
+Save the clustered dataset. Overwrite the existing, subset dataset. 
+```{r,eval = FALSE}
+save(sobject.sub.astro,file = file.path(dir,datafolder,paste0(project,"_",iterationname,".RData")))
+```
+
+Block to print multiple graphs: 
+```{r}
+Plotfolder = "Plots/Astrocyte Subset"
+DefaultAssay(sobject.sub.astro) = "RNA"
+
+name = paste0(project,"_",iterationname)
+genes = c("Aldh1l1", "Gfap", "Itgb8", "Stat3", "C3", "Cfb", "S100a10", "Mki67", "Ngf", "Bdnf", "Slc1a2", "Cd84", "Aqp4", "Vcan", "Syt1", "Epn2")
+groups = c("timepoint_genotype", "timepoint", "microanatomy", "astrotype")
+
+genes = genes[genes %in% rownames(GetAssayData(sobject.sub.astro,slot = "data"))]
+
+for(feature in genes){
+  PrintSeuratGraph(namecard = name,graphtype = "feature",feature = feature)
+}
+
+#dim plots for clustering
+for(group in groups){
+  PrintSeuratGraph(namecard = name,graphtype = "dim",group = group, feature = group)
+}
+
+PrintSeuratGraph(namecard = name, graphtype = "dim", group = "seurat_clusters", feature = "seurat_clusters", label=F)
+PrintSeuratGraph(namecard = name, graphtype = "dim", group = "astrotype", feature = "astrotype", label=F)
+
+
+#violin plots
+for(feature in c(genes)){
+  PrintSeuratGraph(namecard = name,graphtype = "violin",feature = feature,group = "seurat_clusters")
+}
+
+#plot individual timepoint_genotype dim plots, no legends
+Plotfolder = "Plots/Astrocyte Subset/Timepoint Dimplots"
+for(condition in levels(as.factor(sobject.sub.astro$timepoint_genotype))){
+  cells = names(which(sobject.sub.astro$timepoint_genotype == condition))
+  graph = DimPlot(sobject.sub.astro, cells = cells, group.by = "seurat_clusters", label = T) + ggplot2::theme(legend.position = "none") + ggtitle(condition) + xlim(-11,13) + ylim(-14, 13)
+  name = paste0(condition, "_dimplot.eps")
+  setEPS()
+  postscript(file.path(dir,Plotfolder,name))
+  print(graph)
+  dev.off()
+}
+```
+
+```{r}
+#Edit this part carefully. You can add any number of types. Each cluster can only be one type. 
+
+type0 = c(-1)
+name0 = "Vcan"
+type1 = c(0)
+name1 = "Gfap"
+type2 = c(1)
+name2 = "Slc1a2"
+type3 = c(2)
+name3 = "Stat3"
+type4 = c(3)
+name4 = "Cd84"
+type5 = c(4)
+name5 = "Epn2"
+type6 = c(5)
+name6 = "Syt1"
+
+
+#Initialize the cluster levels as a vector and replace the cluster levels with the appropriate name. 
+clusters = as.factor(sobject.sub.astro$seurat_clusters)
+type = levels(clusters)
+type[type0+2] = name0
+type[type1+2] = name1
+type[type2+2] = name2
+type[type3+2] = name3
+type[type4+2] = name4
+type[type5+2] = name5
+type[type6+2] = name6
+
+levels(clusters) = type
+
+#Add a metadata column
+sobject.sub.astro$astrotype = clusters
+
+#check the celltype assignment for accuracy
+table(sobject.sub.astro$astrotype,sobject.sub.astro$seurat_clusters)
+
+#add a metadata column labelling each cluster
+sobject.sub.astro$astrotypecluster = paste0(sobject.sub.astro$astrotype,"-",sobject.sub.astro$seurat_clusters)
+Idents(sobject.sub.astro) = "astrotype"
+```
+
+Save the clustered dataset with fibtype labels. Overwrite the existing, clustered dataset. 
+```{r,eval = FALSE}
+save(sobject.sub.astro,file = file.path(dir,datafolder,paste0(project,"_",iterationname,".RData")))
+```
+
+
+Save the tree
+```{r}
+# Idents(sobject.sub.fib) = column
+Idents(sobject.sub.astro) = "seurat_clusters"
+sobject.sub.astro= BuildClusterTree(sobject.sub.astro,dims = pcs)
+tree = sobject.sub.astro@tools$BuildClusterTree
+setEPS()
+postscript(file.path(dir,"Trees",paste0(project,"_",iterationname,"_tree.eps")))
+plot.phylo(tree, use.edge.length = T, direction = "rightwards")
+dev.off()
+```
+
+*Note: already scaled/normalized (before subsetting, in 2_Processing.Rmd)*
+
+*Heatmap*
+
+First calculate DE genes for every cluster (with meninges)
+```{r,results = "hide",eval = FALSE}
+Idents(sobject.sub.astro) = column
+markers_all <- FindAllMarkers(
+    object = sobject.sub.astro,
+    assay = "RNA",  ##Edited to do DEG analysis on RNA counts, not SCT transformed data
+    features = rownames(sobject.sub.astro),
+    test.use = "MAST",
+    only.pos = FALSE, 
+    min.pct = 0.05, 
+    logfc.threshold = 0.2
+)
+write.csv(markers_all,file = file.path(dir,"Spreadsheets",paste0(project, "_", iterationname, "_all_markers.csv")))
+```
+
+
+Make the heatmap
+```{r}
+#read in a de gene file
+
+#performed on Presidio, then resaved with new iterrationname
+markers = read.csv(file.path(dir,"Spreadsheets",paste0(project, "_", iterationname, "_all_markers.csv")),stringsAsFactors = F)
+
+#Select only the genes that pass thresholds
+markers = markers[markers$p_val_adj<pval,]
+
+#pick only positives, or restrict by min/max pct expression using pct1/2
+markers = markers[markers$avg_log2FC > lfc,] #make log2FC >0.2 for heatmaps, >0 for volcano plots
+markers = markers[markers$pct.1 > minpct & markers$pct.2 < maxpct,]
+
+#If you want, select markers that define a single cluster
+if (single){markers <- markers[markers$gene %in% names(table(markers$gene))[table(markers$gene) == 1],] }
+
+table(markers$cluster)
+
+topgenes <- markers %>% group_by(cluster) %>% top_n(10, avg_log2FC) #top 10 genes
+topgenes = topgenes[order(topgenes$cluster),]
+
+#Subset each cluster to ncells
+cellnames = sobject.sub.astro@meta.data[,column]
+names(cellnames) = colnames(sobject.sub.astro)
+clusters = levels(as.factor(cellnames))
+newcellnames = NULL
+for (cluster in clusters){
+  n = length(cellnames[cellnames == cluster])
+  if (n > ncells){n = ncells}
+  newcluster = sample(cellnames[cellnames == cluster],n, replace = F)
+  newcellnames = c(newcellnames,newcluster)
+}
+
+#check
+table(newcellnames)
+
+#Make heatmap
+setEPS()
+postscript(file.path(dir,"Heatmaps", paste0(project,"_",iterationname, "_", column,"_",pval,"_ncells",ncells,"heatmap.eps")))
+DoHeatmap(
+    object = sobject.sub.astro, 
+    features = c(topgenes$gene),
+    cells = names(newcellnames),
+    group.by = column,
+    size = 4,
+    label = T,
+    draw.lines = T,
+    raster = FALSE
+) + theme(axis.text.y = element_text(size = 4))
+
+dev.off()
+
+#manual for FIGURE
+
+avgexp <- AverageExpression(sobject.sub.astro, return.seurat = TRUE, verbose = TRUE)
+
+markers_new <- markers %>% group_by(cluster) %>% top_n(3, avg_log2FC) #top 10 genes
+markers_new = markers_new[order(markers_new$cluster),]
+markers_new = markers_new$gene
+
+setEPS()
+postscript(file.path(dir,"Heatmaps", paste0(project,"_",iterationname, "_average_heatmap.eps")))
+DoHeatmap(
+    object = avgexp, 
+    features = markers_new,
+    size = 5,
+    label = T,
+    raster = F,
+    draw.lines = F) + scale_fill_gradientn(colors = rev(RColorBrewer::brewer.pal(n =4, name = "RdBu"))) + theme(axis.text.y = element_text(size = 15))
+dev.off()
+
+# Dotplot
+
+setEPS()
+postscript(file.path(dir,"DotPlots", paste0(project,"_",iterationname, "astro_dotplot.eps")), width = 6, height = 4)
+DotPlot(sobject.sub.astro, assay = "RNA", features = unique(markers_new), cols = "RdBu") + theme(axis.text.x = element_text(angle = 90, hjust = 0.95))
+dev.off()
+```
+
+Print heatmap to console
+
+```{r}
+DoHeatmap(
+    object = sobject.sub.fib, 
+    features = c(topgenes$gene),
+    cells = names(newcellnames),
+    group.by = column,
+    size = 5,
+    label = T,
+    draw.lines = T
+)
+```
+
+#Subset to WT (for barplots)
+```{r}
+Idents(sobject.sub.astro) = "genotype"
+sobject.sub.astro.wt = subset(sobject.sub.astro, idents = "WT")
+save(sobject.sub.astro,file = file.path(dir,datafolder,paste0(project,"_",iterationname,"_WT.RData")))
+```
+
+***GENE SET TESTING**
+https://sbc.shef.ac.uk/prostate-bioinformatics/rna-seq-gene-set-testing.nb.html
+
+```{r}
+#Note - "old" version performed with meningeal clusters, new version performed without
+
+Plotfolder = "Plots/Astrocyte Subset/GO"
+
+plots = list()
+names = list()
+i=1
+
+# create list of all genes
+all_genes = rownames(sobject.sub.astro)
+
+# create list of DE genes
+de_all = read.csv(file.path(dir,"Spreadsheets",paste0(project, "_", iterationname, "_all_markers.csv")),stringsAsFactors = F)
+
+#generate list of fib clusters from de_all (using names)
+clusters_named = levels(as.factor(sobject.sub.astro$astrotypecluster))
+#sort by ascending value of cluster number
+nums_to_sort = c(4, 5, 1, 2, 3, 6, 0)
+names(nums_to_sort) = clusters_named
+nums_to_sort = sort(nums_to_sort)
+# "clusters_named" variable contains cluster number and name; "clusters" variable contains only number
+clusters_named = names(nums_to_sort)
+clusters = nums_to_sort
+
+for(cluster in clusters_named){
+
+  #numeric cluster num (no name) for finding in defile
+  cluster_find = clusters[which(clusters_named == cluster)]
+  
+  print(paste0("Iteration: ", cluster))
+  name = paste0(project, iterationname, "_cluster_", cluster)
+  graphname = paste0("Cluster ", cluster)
+    
+  de = de_all[which(de_all$cluster == cluster_find),]
+  
+  sig_de_genes = de[(de$p_val_adj < 0.05),][,1]
+  
+  #enrichGO
+  
+  enrich_go <- enrichGO(
+    gene= sig_de_genes,
+    OrgDb = org.Mm.eg.db,
+    keyType = "SYMBOL",
+    ont = c("ALL"),
+    universe = all_genes,
+    qvalueCutoff = 0.05,
+    readable=TRUE
+  )
+  
+  empty = FALSE
+  num_enriched = length(enrich_go@result$ID)
+  if(num_enriched == 0){
+    empty = TRUE
+    print(paste0(cluster, " is empty"))
+    p1 = p2 = p3 = "No terms enriched"
+  } else print(paste0(cluster, " enriched: ", num_enriched))
+  
+  if(empty == FALSE){p1 = dotplot(enrich_go, showCategory = 20, font.size = 8) + ggtitle(graphname) + theme(plot.title = element_text(hjust = 0.5))}
+
+  name1 = paste0(name, "_GO_enrich_dotplot.eps")
+  plots[[i]] = p1
+  names[[i]] = name1
+  i = i+1
+
+  if(empty == FALSE){p2 = barplot(enrich_go, showCategory = 20, font.size = 8) + ggtitle(graphname) + theme(plot.title = element_text(hjust = 0.5))}
+  name2 = paste0(name, "_GO_enrich_barplot.eps")
+  plots[[i]] = p2
+  names[[i]] = name2
+  i = i+1
+  
+  if(empty == FALSE){p3 = dotplot(enrich_go, split="ONTOLOGY", font.size = 8) + facet_grid(ONTOLOGY~., scale="free")  + ggtitle(graphname) + theme(plot.title = element_text(hjust = 0.5))}
+  name3 = paste0(name, "_GO_enrich_dotplot_split.eps")
+  plots[[i]] = p3
+  names[[i]] = name3
+  i = i+1
+  
+  print(paste0("Success: ", cluster, "       i: ", i))
+}
+
+for(i in 1:length(plots)){
+  plot = plots[[i]]
+  name = names[[i]]
+
+  setEPS()
+  postscript(file.path(dir,Plotfolder,name))
+  print(plot)
+  dev.off()
+}
+```
