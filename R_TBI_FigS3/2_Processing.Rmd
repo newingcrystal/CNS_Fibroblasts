@@ -1,0 +1,801 @@
+---
+title: "2_Processing"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#if (!require("BiocManager", quietly = TRUE))
+#    install.packages("BiocManager")
+
+#BiocManager::install("variancePartition")
+
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+library(ape)
+library(cowplot)
+library(Matrix)
+library(variancePartition)
+library(MAST)
+
+#BiocManager::install("Nebulosa")
+library("Nebulosa")
+library(EnhancedVolcano)
+```
+
+#Load filtered seurat object
+```{r}
+load(file.choose())
+sobject = sobject.merge
+rm(sobject.merge)
+
+#add metadata left out from QC
+sex = sobject$sampleid
+sex[sex %in% c("TBI_19", "TBI_20")] = "Female"
+sex[sex != "Female"] = "Male"
+sobject$sex = sex
+```
+
+```{r}
+#Specify your preferred directory for all input + output
+dir = "/Users/nathanewing-crystal/Ari Molofsky Lab Dropbox/Ari Molofsky Lab Team Folder/Nathan Ewing-Crystal/RNASeq/TBI_Seq/seurat"
+#Specify exactly where your seurat files live
+datafolder = "Data/Seurat"
+
+project<-"tbi_snsrnaseq" 
+
+#set up folders
+QCfolder = "QC"
+Plotfolder = "Plots"
+
+#metrics you want to look at for QC
+m = c("nCount_RNA","nFeature_RNA","percent.mito","percent.ribo")
+
+#You can add in housekeeping genes if you want them to be scaled always; otherwise set to "NULL"
+add.genes = NULL
+
+#Choose what to regress out - could be age, sex, or any metadata column
+regress = c("nCount_RNA","percent.mito")
+
+#Decide whether to use SCtransform (can take a long time with big datasets; generally recommended)
+sct = TRUE
+
+#How many genes do you want scaled to use for UMAP/clustering? 
+ngenes = 6000
+
+#Which principal components do you want to calculate on? This is a default setting, change if one of the pc's is for something you think is a technical error (i.e. HSP, RP, etc)
+pcs = c(1:30)
+
+#clustering resolution; the last number will be saved as "seurat_clusters" in metadata
+res = c(1.5,1.0,0.5, 0.1) #0.1 used in paper
+
+#Important genes to determine your cells of interest
+igenes = c("COL1A1", "DCN", "GFAP", "RBFOX3", "PDGFRA", "PDGFRB")
+
+#metadata dimensions you want to cluster on
+dims = c("seurat_clusters","sampleid", "timepoint","condition", "sex")
+
+#sexgenes to remove from dataset
+sexgenes = c("XIST", "TSIX", "DDX3Y", "EIF2S3Y", "FKBP5", "DDIT4", "UTY")
+
+#edit to include all desired celltypes to subset on later; if not subsetting, set to "all"
+keep = "all"
+#c("cd8"etc)
+
+#make a unique name; maybe this is the celltype you've already subset, or the age you're looking at, etc.
+iterationname = "scaled_processed"
+
+#Establish cutoffs for heatmaps
+pval = 1e-3 #max p-value for significance
+lfc = 0.2 #minimum log fold change
+minpct = 0.05 #if you want to subset by percent cells in that cluster expressing the gene
+maxpct = 1
+single = F #should each gene be a marker of a single cluster only
+hgenes = 3 #how many genes should be in the heatmap per cluster
+ncells = 100 #max # of cells per heatmap column
+column = "seurat_clusters" #division you care about
+
+#Variance partition: Remove genes only associated with a technical variable or sex of the mouse
+variance = T
+```
+
+Function to print multiple graphs: 
+```{r}
+PrintSeuratGraph = function(namecard = "a",seurat_object = sobject,graphtype = "feature",feature = NULL,group = NULL,split=NULL,cellnames=NULL, label=FALSE){
+  if (!is.null(cellnames)){
+    #Idents(seurat_object) = cellnames[1]
+    #cells = colnames(seurat_object)[Idents(seurat_object) %in% cellnames[1:length(cellnames)]]} 
+    cells = cellnames}
+  else {cells = cellnames}
+  if (graphtype == "feature"){
+    graph = FeaturePlot(seurat_object,features = feature,split.by = split, cells = cells,cols = c("lightyellow","darkred"))
+  }
+  if (graphtype == "violin"){
+    graph = VlnPlot(seurat_object,features = feature, pt.size = 0.1, idents = cellnames[2:length(cellnames)],group.by = group, split.by = split)
+  }
+  if (graphtype == "dim"){
+    graph = DimPlot(seurat_object,cells = cells, group.by = group, split.by = split, label = label)
+  }
+  name = paste0(feature,"_",graphtype,namecard,".eps")
+  graph
+  setEPS()
+  postscript(file.path(dir,Plotfolder,name))
+  print(graph)
+  dev.off()
+}
+```
+
+Find variable features, normalize, scale, run PCA, clustering, umap
+The following is the standard method of normalization and scaling. Interchangeable with the next chunk. Run both, you should have already specified which to use with "sct = T or F". Will take 5-20 minutes to run. 
+```{r,results = 'hide',eval = FALSE}
+if (!sct){
+  sobject <- NormalizeData(sobject,normalization.method = "LogNormalize", scale.factor = 10000)
+  sobject<-FindVariableFeatures(sobject, selection.method = "vst", nfeatures = ngenes)
+  
+  all.genes<-rownames(sobject)
+  var.genes = VariableFeatures(sobject)
+  add.genes = add.genes[!add.genes %in% var.genes]
+  
+  any(add.genes %in% var.genes)
+  scalegenes = c(var.genes,add.genes)
+  VariableFeatures(sobject) = scalegenes
+  sobject<-ScaleData(sobject,features = VariableFeatures(sobject), vars.to.regress = regress)
+}
+```
+
+Alternative: SCTransform (great for smaller datasets)
+```{r, results='hide',eval = FALSE}
+if (sct){
+  sobject <- SCTransform(sobject, vars.to.regress = regress, verbose = FALSE,variable.features.n = ngenes,conserve.memory = T)
+}
+```
+
+Show most variable genes
+```{r}
+labels <- c(head(VariableFeatures(sobject),10),add.genes)
+plot1 = VariableFeaturePlot(sobject)
+LabelPoints(plot=plot1, points = labels, repel = F, xnudge = 0.1, ynudge = 0.5)
+```
+Run "Variance Partition" - this will remove the genes most associated with sex (you can choose any column)
+
+Takes a really long time if you load all genes
+Individual and Tissue are both categorical,so model them as random effects; Note the syntax used to specify random effects
+
+```{r,results= "hide",eval = FALSE}
+if (variance){
+  library(variancePartition)
+  var.genes<-VariableFeatures(sobject)
+  geneExpr = GetAssayData(sobject,slot = "data")
+  geneExpr = as.matrix(geneExpr[rownames(geneExpr)%in% var.genes,])
+  geneExpr = geneExpr[rowSums(geneExpr)>0,]
+  info = sobject@meta.data
+  info$nCount_RNA = info$nCount_RNA/sum(info$nCount_RNA)
+  form <- ~ percent.mito + percent.ribo + nCount_RNA + (1|sex) + (1|timepoint)
+  varPart <- fitExtractVarPartModel(geneExpr, form, info )
+  varPartSave = as.data.frame(varPart)
+  write.csv(varPartSave,file = file.path(dir,"Spreadsheets",paste0(Project(sobject),"_variancepartition.csv")))
+}
+```
+
+```{r}
+varPart = read.csv(file.path(dir,"Spreadsheets",paste0(Project(sobject),"_variancepartition.csv")),stringsAsFactors = F,row.names = 1)
+```
+
+```{r}
+if (variance){
+  library(variancePartition)
+  # sort variables (i.e. columns) by median fraction of variance explained
+  vp <- sortCols(varPart )
+  
+  #order on each column
+  vs = varPart[order(varPart$sex,decreasing = T),]
+  vm = varPart[order(varPart$percent.mito,decreasing = T),]
+  vr = varPart[order(varPart$percent.ribo,decreasing = T),]
+  vc = varPart[order(varPart$nCount_RNA,decreasing = T),]
+  
+  # Bar plot of variance fractions for the first 10 genes
+  print(plotVarPart(varPart))
+  print(plotPercentBars( vm[1:50,] ))
+  print(plotPercentBars( vs[1:50,] ))
+  plotPercentBars( vr[1:50,] )
+  print(plotPercentBars( vc[1:50,] ))
+  
+        
+  # violin plot of contribution of each variable to total variance
+  setEPS()
+  postscript(file.path(dir,"QC",paste0(project,"vln_variance.eps")))
+  print(plotVarPart(varPart))
+  dev.off()
+  
+  setEPS()
+  postscript(file.path(dir,"QC",paste0(project,"sex_variance.eps")))
+  print(plotPercentBars( vs[1:50,] ))
+  dev.off()
+  
+  setEPS()
+  postscript(file.path(dir,"QC",paste0(project,"mito_variance.eps")))
+  print(plotPercentBars( vm[1:50,] ))
+  dev.off()
+  
+  setEPS()
+  postscript(file.path(dir,"QC",paste0(project,"ribo_variance.eps")))
+  print(plotPercentBars( vr[1:50,] ))
+  dev.off()
+  
+  setEPS()
+  postscript(file.path(dir,"QC",paste0(project,"ncount_variance.eps")))
+  print(plotPercentBars( vc[1:50,] ))
+  dev.off()
+}
+```
+
+```{r}
+if (variance){
+  sexgenes = rownames(vs)[1:5]
+  mitogenes = rownames(vm)[1:10]
+  remove.genes = c(sexgenes,mitogenes)
+  var.genes = VariableFeatures(sobject)
+  var.genes = var.genes[!var.genes %in% remove.genes]
+  VariableFeatures(sobject) = var.genes
+}
+```
+
+
+Run PCA analysis and show elbow plot
+```{r}
+sobject <- RunPCA(sobject,features = VariableFeatures(sobject),npcs = 50, verbose = FALSE)
+ElbowPlot(sobject,ndims = 50, reduction = "pca")
+print(sobject[["pca"]], dims = 1:20, nfeatures = 5)
+```
+Harmony (performed in original paper)
+```{r}
+install.packages("harmony")
+library(harmony)
+sobject <- RunHarmony(sobject, "sampleid")
+```
+
+Once you are satisfied with pc's, run clustering: 
+```{r}
+sobject<-RunUMAP(sobject,reduction = "harmony",dims = pcs, verbose = F) #note USE HARMONY embeddings
+sobject<-FindNeighbors(sobject,dims=pcs,verbose=F)
+sobject<-FindClusters(sobject,verbose=F,resolution = res)
+```
+
+Plot important objects; check parameters before moving forward, evaluate QC, clustering
+```{r}
+for (dim in dims){
+  print(DimPlot(sobject,group.by = dim, label = T))
+}
+
+DimPlot(sobject, split.by = "condition")
+FeaturePlot(sobject,igenes, order=T, slot="counts")
+FeaturePlot(sobject,m)
+
+VlnPlot(sobject,igenes,pt.size = 0.01, assay="RNA")
+
+#Build a clustering tree
+Idents(sobject) = "seurat_clusters"
+sobject= BuildClusterTree(sobject,dims = pcs)
+tree = sobject@tools$BuildClusterTree
+plot.phylo(tree, use.edge.length = T, direction = "rightwards")
+```
+
+*Note that the chunk below requires you to manually decide which clusters to keep or exclude. The violin plots will help decide based on marker genes. You can also choose to annotate (as many types as you want) and skip subsetting.*
+```{r}
+#Edit this part carefully. You can add any number of types. Each cluster can only be one type. 
+#Note - updated with "sctype" insight (see 4_sctype.Rmd)
+#Note - updated cluster 0 --> microglia_macrophages, cluster 23 --> mural_pericytes (only in "final" version)
+type0 = c(-1)
+name0 = "Oligo"
+type1 = c(0)
+name1 = "Neuron_1"
+type2 = c(1)
+name2 = "Neuron_2"
+type3 = c(2)
+name3 = "Neuron_3"
+type4 = c(3)
+name4 = "Neuron_4"
+type5 = c(4)
+name5 = "Neuron_5"
+type6 = c(5)
+name6 = "OPC"
+type7 = c(6)
+name7 = "Neuron_6"
+type8 = c(7)
+name8 = "Astrocyte_1"
+type9 = c(8)
+name9 = "Immune"
+type10 = c(9)
+name10 = "Astrocyte_2"
+type11 = c(10)
+name11 = "Unknown"
+type12 = c(11)
+name12 = "Oligo"
+type13 = c(12)
+name13 = "Fibroblasts"
+
+
+#Initialize the cluster levels as a vector and replace the cluster levels with the appropriate name. 
+clusters = as.factor(sobject$seurat_clusters)
+type = levels(clusters)
+type[type0+2] = name0
+type[type1+2] = name1
+type[type2+2] = name2
+type[type3+2] = name3
+type[type4+2] = name4
+type[type5+2] = name5
+type[type6+2] = name6
+type[type7+2] = name7
+type[type8+2] = name8
+type[type9+2] = name9
+type[type10+2] = name10
+type[type11+2] = name11
+type[type12+2] = name12
+type[type13+2] = name13
+
+levels(clusters) = type
+
+#Add a metadata column
+sobject$celltype = clusters
+
+#check the celltype assignment for accuracy
+table(sobject$celltype,sobject$seurat_clusters)
+
+#Check them against your marker genes
+VlnPlot(sobject,igenes,group.by = "celltype",pt.size = 0.01)
+
+#add a metadata column labelling each cluster
+sobject$celltypecluster = paste0(sobject$celltype,"-",sobject$seurat_clusters)
+```
+
+Save the tree
+```{r}
+Idents(sobject) = column
+sobject= BuildClusterTree(sobject,dims = pcs)
+tree = sobject@tools$BuildClusterTree
+setEPS()
+postscript(file.path(dir,"Trees",paste0(project,"_",iterationname,"_tree.eps")))
+plot.phylo(tree, use.edge.length = T, direction = "rightwards")
+dev.off()
+```
+
+Save the clustered dataset. Overwrite the existing, subset dataset. 
+```{r,eval = FALSE}
+save(sobject,file = file.path(dir,datafolder,paste0(project,"_",iterationname,".RData")))
+```
+
+Block to print multiple graphs: 
+```{r}
+Plotfolder = "Plots"
+name = paste0(project,"_",iterationname)
+genes = igenes
+features = m
+groups = c(dims, "celltype","celltypecluster")
+genes = genes[genes %in% rownames(GetAssayData(sobject,slot = "data"))]
+
+for(feature in genes){
+  PrintSeuratGraph(namecard = name,graphtype = "feature",feature = feature)
+}
+
+for(feature in features){
+  PrintSeuratGraph(namecard = name,graphtype = "feature",feature = feature)
+}
+
+#split feature plots by individual
+for(feature in c(features)){
+  PrintSeuratGraph(namecard = paste0(name,"_split"),graphtype = "feature",feature = feature,split = "sampleid")
+}
+
+#dim plots for clustering
+for(group in groups){
+  PrintSeuratGraph(namecard = name,graphtype = "dim",group = group, feature = group)
+  PrintSeuratGraph(namecard = paste0(name,"_labeled_"),graphtype = "dim",group = group, feature = group, label = TRUE)
+}
+
+#celltype without legend
+graph = DimPlot(sobject, group.by = "celltype", label=TRUE) + ggplot2::theme(legend.position = "none")
+setEPS()
+postscript(file.path(dir,Plotfolder,"dimplot_nolegend.eps"))
+print(graph)
+dev.off()
+
+#violin plots
+for(feature in c(genes,features)){
+  PrintSeuratGraph(namecard = name,graphtype = "violin",feature = feature,group = "seurat_clusters")
+}
+```
+#After clustering, analysis should be performed on normalized/scaled "RNA" slot
+```{r}
+DefaultAssay(sobject) <- "RNA"
+sobject <- NormalizeData(sobject)
+sobject <- ScaleData(sobject)
+```
+
+#=====================================***DID NOT PERFORM BELOW***=====================================
+*Heatmap*
+
+First calculate DE genes for every cluster
+```{r,results = "hide",eval = FALSE}
+Idents(sobject) = column
+#Note - performed twice, once on non-normalized and subsequently on normalized (both times using "RNA" slot, i.e. not scaled [even though scaled, above])
+markers_all <- FindAllMarkers(
+    object = sobject,
+    assay = "RNA",  ##Edited to do DEG analysis on RNA counts, not SCT transformed data
+    features = rownames(sobject),
+    test.use = "MAST",
+    only.pos = FALSE, 
+    min.pct = 0.05, 
+    logfc.threshold = 0.2
+)
+write.csv(markers_all,file = file.path(dir,"Spreadsheets",paste0(project, "_", iterationname, "_all_markers.csv")))
+```
+#=====================================***DID NOT PERFORM BELOW***=====================================
+Make the heatmap
+```{r}
+#read in a de gene file
+
+#performed on Presidio, then resaved with new iterrationname
+iterationname_old = "processed"
+markers = read.csv(file.path(dir,"Spreadsheets",paste0(project, "_", iterationname_old, "_all_markers.csv")),stringsAsFactors = F)
+
+#Select only the genes that pass thresholds
+markers = markers[markers$p_val_adj<pval,]
+
+#pick only positives, or restrict by min/max pct expression using pct1/2
+markers = markers[markers$avg_log2FC > lfc,] #make log2FC >0.2 for heatmaps, >0 for volcano plots
+markers = markers[markers$pct.1 > minpct & markers$pct.2 < maxpct,]
+
+#If you want, select markers that define a single cluster
+if (single){markers <- markers[markers$gene %in% names(table(markers$gene))[table(markers$gene) == 1],] }
+
+table(markers$cluster)
+
+topgenes <- markers %>% group_by(cluster) %>% top_n(10, avg_log2FC) #top 10 genes
+topgenes = topgenes[order(topgenes$cluster),]
+
+#Subset each cluster to ncells
+cellnames = sobject@meta.data[,column]
+names(cellnames) = colnames(sobject)
+clusters = levels(as.factor(cellnames))
+newcellnames = NULL
+for (cluster in clusters){
+  n = length(cellnames[cellnames == cluster])
+  if (n > ncells){n = ncells}
+  newcluster = sample(cellnames[cellnames == cluster],n, replace = F)
+  newcellnames = c(newcellnames,newcluster)
+}
+
+#check
+table(newcellnames)
+
+#Make heatmap
+setEPS()
+postscript(file.path(dir,"Heatmaps", paste0(project,"_",iterationname, "_", column,"_",pval,"_ncells",ncells,"heatmap.eps")))
+DoHeatmap(
+    object = sobject, 
+    features = c(topgenes$gene),
+    cells = names(newcellnames),
+    group.by = column,
+    size = 4,
+    label = T,
+    draw.lines = T,
+    raster = FALSE
+) + theme(axis.text.y = element_text(size = 2))
+
+dev.off()
+```
+#=====================================***DID NOT PERFORM BELOW***=====================================
+Print heatmap to console
+
+```{r}
+DoHeatmap(
+    object = sobject, 
+    features = c(topgenes$gene),
+    cells = names(newcellnames),
+    group.by = column,
+    size = 5,
+    label = T,
+    draw.lines = T
+)
+```
+
+Subset the data if necessary; will only run if "keep" includes some celltype
+
+Subset the data to include only your cells of interest: 
+```{r}
+#create fibroblast subset Seurat objects for reclustering
+celltype = levels(as.factor(sobject$celltype))
+fibroblast_keep = celltype[c(13)]
+
+sobject.sub.fib = subset(sobject,subset = celltype %in% fibroblast_keep)
+save(sobject.sub.fib,file = file.path(dir,datafolder,paste0(project,"_",iterationname,"_fib.RData")))
+```
+
+#FIBROBLAST SUBSET PROCESSING
+```{r}
+#make a unique name; maybe this is the celltype you've already subset, or the age you're looking at, etc.
+iterationname = "fib_reclustered"
+```
+
+Find variable features, normalize, scale, run PCA, clustering, umap
+The following is the standard method of normalization and scaling. Interchangeable with the next chunk. Run both, you should have already specified which to use with "sct = T or F". Will take 5-20 minutes to run. 
+```{r,results = 'hide',eval = FALSE}
+if (!sct){
+  sobject.sub.fib <- NormalizeData(sobject.sub.fib,normalization.method = "LogNormalize", scale.factor = 10000)
+  sobject.sub.fib<-FindVariableFeatures(sobject.sub.fib, selection.method = "vst", nfeatures = ngenes)
+  
+  all.genes<-rownames(sobject.sub.fib)
+  var.genes = VariableFeatures(sobject.sub.fib)
+  add.genes = add.genes[!add.genes %in% var.genes]
+  
+  any(add.genes %in% var.genes)
+  scalegenes = c(var.genes,add.genes)
+  VariableFeatures(sobject.sub.fib) = scalegenes
+  sobject.sub.fib<-ScaleData(sobject.sub.fib,features = VariableFeatures(sobject.sub.fib), vars.to.regress = regress)
+}
+```
+
+Alternative: SCTransform (great for smaller datasets)
+```{r, results='hide',eval = FALSE}
+if (sct){
+  sobject.sub.fib <- SCTransform(sobject.sub.fib, vars.to.regress = regress, verbose = FALSE,variable.features.n = ngenes,conserve.memory = T)
+}
+```
+
+Show most variable genes
+```{r}
+labels <- c(head(VariableFeatures(sobject.sub.fib),10),add.genes)
+plot1 = VariableFeaturePlot(sobject.sub.fib)
+LabelPoints(plot=plot1, points = labels, repel = F, xnudge = 0.1, ynudge = 0.5)
+```
+
+Run PCA analysis and show elbow plot
+```{r}
+sobject.sub.fib <- RunPCA(sobject.sub.fib,features = VariableFeatures(sobject.sub.fib),npcs = 50, verbose = FALSE)
+ElbowPlot(sobject.sub.fib,ndims = 50, reduction = "pca")
+print(sobject.sub.fib[["pca"]], dims = 1:20, nfeatures = 5)
+```
+
+Once you are satisfied with pc's, run clustering: 
+```{r}
+sobject.sub.fib<-RunUMAP(sobject.sub.fib,reduction = "pca",dims = pcs, verbose = F)
+sobject.sub.fib<-FindNeighbors(sobject.sub.fib,dims=pcs,verbose=F)
+sobject.sub.fib<-FindClusters(sobject.sub.fib,verbose=F,resolution = res)
+sobject.sub.fib$seurat_clusters = sobject.sub.fib$SCT_snn_res.1
+Idents(sobject.sub.fib) = "seurat_clusters"
+DimPlot(sobject.sub.fib, split.by = "condition")
+```
+
+```{r}
+DefaultAssay(sobject.sub.fib) = "RNA"
+```
+
+```{r}
+Plotfolder = "Plots/Fibroblast Subset"
+name = paste0(project,"_",iterationname)
+genes = c("COL1A2", "CTHRC1", "ACTA2", "CXCL12", "FAP", "IL33", "FN1")
+groups = c("timepoint", "condition", "sampleid", "seurat_clusters")
+genes = genes[genes %in% rownames(GetAssayData(sobject.sub.fib,slot = "data"))]
+
+for(feature in genes){
+  PrintSeuratGraph(sobject.sub.fib, namecard = name,graphtype = "feature",feature = feature)
+}
+
+#dim plots for clustering
+for(group in groups){
+  PrintSeuratGraph(sobject.sub.fib, namecard = name,graphtype = "dim",group = group, feature = group)
+}
+
+#violin plots
+for(feature in c(genes)){
+  PrintSeuratGraph(sobject.sub.fib, namecard = name,graphtype = "violin",feature = feature,group = "seurat_clusters")
+}
+```
+
+First calculate DE genes for every cluster
+```{r,results = "hide",eval = FALSE}
+Idents(sobject.sub.fib) = column
+markers_all <- FindAllMarkers(
+    object = sobject.sub.fib,
+    assay = "RNA",  ##Edited to do DEG analysis on RNA counts, not SCT transformed data
+    features = rownames(sobject.sub.fib),
+    test.use = "MAST",
+    only.pos = FALSE, 
+    min.pct = 0.05, 
+    logfc.threshold = 0.2
+)
+write.csv(markers_all,file = file.path(dir,"Spreadsheets",paste0(project, "_", iterationname, "_all_markers.csv")))
+```
+
+Make the heatmap
+```{r}
+#read in a de gene file
+markers = read.csv(file.path(dir,"Spreadsheets",paste0(project, "_", iterationname, "_all_markers.csv")),stringsAsFactors = F)
+
+#Select only the genes that pass thresholds
+markers = markers[markers$p_val_adj<pval,]
+
+#pick only positives, or restrict by min/max pct expression using pct1/2
+markers = markers[markers$avg_log2FC > lfc,] #make log2FC >0.2 for heatmaps, >0 for volcano plots
+markers = markers[markers$pct.1 > minpct & markers$pct.2 < maxpct,]
+
+#If you want, select markers that define a single cluster
+if (single){markers <- markers[markers$gene %in% names(table(markers$gene))[table(markers$gene) == 1],] }
+
+table(markers$cluster)
+
+topgenes <- markers %>% group_by(cluster) %>% top_n(10, avg_log2FC) #top 10 genes
+topgenes = topgenes[order(topgenes$cluster),]
+
+#Subset each cluster to ncells
+cellnames = sobject.sub.fib@meta.data[,column]
+names(cellnames) = colnames(sobject.sub.fib)
+clusters = levels(as.factor(cellnames))
+newcellnames = NULL
+for (cluster in clusters){
+  n = length(cellnames[cellnames == cluster])
+  if (n > ncells){n = ncells}
+  newcluster = sample(cellnames[cellnames == cluster],n, replace = F)
+  newcellnames = c(newcellnames,newcluster)
+}
+
+#check
+table(newcellnames)
+
+#Make heatmap
+setEPS()
+postscript(file.path(dir,"Heatmaps", paste0(project,"_",iterationname, "_", column,"_",pval,"_ncells",ncells,"heatmap.eps")))
+DoHeatmap(
+    object = sobject.sub.fib, 
+    features = c(topgenes$gene),
+    cells = names(newcellnames),
+    group.by = column,
+    size = 4,
+    label = T,
+    draw.lines = T,
+    raster = FALSE
+) + theme(axis.text.y = element_text(size = 4))
+
+dev.off()
+```
+
+Print heatmap to console
+
+```{r}
+DoHeatmap(
+    object = sobject.sub.fib, 
+    features = c(topgenes$gene),
+    cells = names(newcellnames),
+    group.by = column,
+    size = 5,
+    label = T,
+    draw.lines = T
+)
+```
+
+#Next, do TBI vs. rest
+```{r}
+Plotfolder = "Plots/Fibroblast Subset/Volcano"
+markers = FindMarkers(
+    sobject.sub.fib,
+    group.by = "condition",
+    ident.1 = "TBI",
+    ident.2 = "Control")
+  
+ write.csv(markers,file = file.path(dir,"Spreadsheets",paste0(project, "_", iterationname, "TBI_vs_rest.csv")))
+  
+  #volcano plot
+  
+#Minimum fold change (i.e. 1.15 = 15% increase)
+minfc = 1.15
+#Max adj. p value
+alpha = 0.05
+#Genes to highlight
+ngenes = 50
+
+ defile = paste0(project, "_", iterationname, "TBI_vs_rest.csv")
+  
+#Comparison being made (must match file names)
+comparison = paste0(project, "_", iterationname, "TBI_vs_rest")
+
+newlist=list(de)
+de = read.csv(file.path(dir,"Spreadsheets", defile),stringsAsFactors = F) #any   spreadsheet with gene symbols or other identifiers
+colnames(de)[1] = "Gene"
+
+#NOTE: generated from "DEG_analysis" script
+fc = de
+fc = fc[!is.na(fc$avg_log2FC),]
+colorkeysdown = fc$Gene[fc$avg_log2FC < -log2(minfc) & fc$p_val_adj < alpha]
+colorkeysup = fc$Gene[fc$avg_log2FC > log2(minfc) & fc$p_val_adj < alpha]
+  
+#Either highlight specific genes or pick the top genes in colorkeysup/down
+top = fc[fc$p_val_adj<alpha,]
+top = top[order(top$avg_log2FC),"Gene"]
+highlight_top = c(head(top,ngenes),tail(top,ngenes))
+size_labels = c(2)
+
+allcolors = rep("darkgrey",length(fc$Gene))
+names(allcolors) = fc$Gene
+allcolors[names(allcolors) %in% colorkeysdown] = "red"
+allcolors[names(allcolors) %in% colorkeysup]= "blue"
+# names(allcolors)[allcolors == "yellow"] = "labelled"
+names(allcolors)[allcolors == "blue"] = "Late (21dpi)"
+names(allcolors)[allcolors == "darkgrey"] = "-"
+names(allcolors)[allcolors == "red"] = "Early (7dpi)"
+    
+#manual label
+name = paste0("Fibroblasts: TBI vs. Rest")
+range = max(max(fc$avg_log2FC), min(fc$avg_log2FC))
+if(is.infinite(range)){range = 150}
+
+setEPS()
+postscript(file.path(dir, Plotfolder, paste0("Volcano_rest_vs_tbi.eps")))
+print(EnhancedVolcano(fc,
+                lab = fc$Gene,
+                x = 'avg_log2FC',
+                y = 'p_val_adj',
+                xlim = c(-range, range),
+                title = name,
+                drawConnectors = T,
+                arrowheads = F,
+                legendPosition = 'bottom',
+                pCutoff = alpha,
+                FCcutoff = log2(minfc),
+                selectLab = highlight_top,
+                labSize = size_labels,
+                pointSize = 0.5,
+                col=c('black', 'black', 'black', 'red3'),
+                colCustom = allcolors,
+                gridlines.major = F,
+                gridlines.minor = F,
+                colAlpha = 1,
+                max.overlaps = 50))
+     dev.off()
+```
+
+#Heatmap with fibrosis-related genes
+```{r}
+Plotfolder = "Heatmaps"
+name = paste0(project, "_", iterationname)
+
+Idents(sobject.sub.fib) = "condition"
+avgexp <- AverageExpression(sobject.sub.fib, return.seurat = TRUE, verbose = TRUE)
+markers = c("FBN2", "CTHRC1", "FN1", "FAP", "COL1A1", "COL1A2", "DCN", "SPP1")
+
+setEPS()
+postscript(file.path(dir,Plotfolder, paste0(name, "fibro_markers_avg.eps")), width = 4, height = 8)
+DoHeatmap(
+    object = avgexp, 
+    features = markers,
+    size = 10,
+    label = T,
+    raster = F,
+    draw.lines = F) + scale_fill_gradientn(colors = rev(RColorBrewer::brewer.pal(n =4, name = "RdBu"))) + theme(axis.text.y = element_text(size = 20))
+dev.off()
+```
+
+```{r}
+#figure
+Plotfolder = "Plots/Fibroblast Subset/figure"
+features = c("FN1", "COL1A1", "FAP", "DCN")
+for(feature in features){
+  setEPS()
+  postscript(file.path(dir,Plotfolder, paste0(feature, ".eps")), width = 4, height = 4)
+  print(VlnPlot(sobject.sub.fib, feature, split.by = "condition"))
+  dev.off()
+}
+
+setEPS()
+postscript(file.path(dir,Plotfolder, "condition_dim.eps"), width = 4, height = 4)
+DimPlot(sobject.sub.fib, group.by = "condition")
+dev.off()
+```
+
+```{r}
+save(sobject.sub.fib,file = file.path(dir,datafolder,paste0(project,"_",iterationname,".RData")))
+```
+

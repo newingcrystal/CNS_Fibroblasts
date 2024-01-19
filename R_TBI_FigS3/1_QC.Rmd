@@ -1,0 +1,278 @@
+---
+title: "TBI_Seq"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+#DATA FROM:
+#https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE209552
+
+```{r}
+install.packages("BiocManager")
+BiocManager::install("Seurat")
+BiocManager::install("ggplot2")
+install.packages("dplr")
+install.packages("ape")
+install.packages("cowplot")
+install.packages("Matrix")
+
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+library(ape)
+library(cowplot)
+library(Matrix)
+#print("clear")
+```
+***BELOW CODE PERFORMED ON PRESIDIO***
+
+*Edit the following code every time* and make sure the folders "QC" and ... are present in the "dir" folder above
+```{r}
+#Specify your preferred directory for all input + output
+dir= "/mnt/DATA/molofsky_lab/newing-crystal/TBI_Seq/seurat"
+
+#Specify exactly where your matrix files/raw data live
+datafolder = "Data"
+
+#Set minimums for genes/cell (min.features) and cell expressing a given gene (min.cells). Default is 1/1, you can filter later. If the object is very large, filter here. 
+min.cells = 1
+min.features = 1000 #used by paper
+
+#Name your project something descriptive
+project<-"tbi_snsrnaseq" 
+
+sexgene = "XIST"
+
+#Add in metadata. You may want to run the next chunk and then return to edit this so it is in the same order as "ids"
+#age = c(rep("P5",2),rep("P7",2))
+#condition = c("Deprived","Control","Deprived","Control")
+
+#metrics you want to look at for QC
+m = c("nCount_RNA","nFeature_RNA","percent.mito")
+
+#set up folders
+QCfolder = "QC"
+```
+
+#load 10x data 
+#NOTE - here, excluding 21dpi_cKO (vs. non Ai14, excluded later)
+```{r}
+#timepoint metadata from paper
+timepoints = c(9, 4, 4, 4, 9, 84, 180, 24, 42, 57, 192, 106, NA, NA, NA)
+names = c("TBI_1", "TBI_2", "TBI_3", "TBI_6", "TBI_7", "TBI_8", "TBI_10", "TBI_11", "TBI_16", "TBI_19", "TBI_20", "TBI_21", "Ctrl_501", "Ctrl_502", "Ctrl_529")
+names(timepoints) = names
+
+data.dir = "/mnt/DATA/molofsky_lab/newing-crystal/TBI_Seq/data/"
+dirs = list.files(data.dir)
+
+sobject_list = list()
+for(i in 1:length(dirs)){
+  
+  data.10x <- Read10X(
+    file.path(data.dir, dirs[i]),
+    gene.column = 2,
+    cell.column = 1,
+    unique.features = TRUE,
+    strip.suffix = FALSE
+  )
+  
+  sobject <- CreateSeuratObject(
+        data.10x,
+        project = project, 
+        min.cells = min.cells, 
+        min.features = min.features)
+  
+  #add metadata
+  sobject$sampleid = dirs[i]
+  if(grepl("Ctrl", dirs[i])){condition = "Control"} else {condition = "TBI"}
+  if(grepl("F", dirs[i])){region = "Frontal"} else {region = "Temporal"}
+  if(condition == "TBI"){timepoint = timepoints[dirs[i]]} else(timepoint = "Rest")
+  
+  sobject$condition = condition
+  sobject$region = region
+  sobject$timepoint = timepoint
+  sobject <- PercentageFeatureSet(sobject, pattern = "^MT-", col.name = "percent.mito")
+  sobject <- PercentageFeatureSet(sobject, pattern = "^RP", col.name = "percent.ribo")
+  
+  sobject_list[i] = sobject
+}
+```
+
+#Merge
+```{r}
+sobject.merge = merge(sobject_list[[1]], y=c(sobject_list[[2]], sobject_list[[3]], sobject_list[[4]], sobject_list[[5]], sobject_list[[6]], sobject_list[[7]], sobject_list[[8]], sobject_list[[9]], sobject_list[[10]], sobject_list[[11]], sobject_list[[12]], sobject_list[[13]], sobject_list[[14]], sobject_list[[15]], sobject_list[[16]], sobject_list[[17]]), add.cell.ids = dirs)
+```
+
+#QC
+
+1. Function to make an annotated violin plot
+```{r}
+anno_vln = function(seurat_object = sobject.merge, metric = "nCount_RNA", group = "orig.ident"){
+  #specify number of categories
+  #n = length(levels(seurat_object@meta.data[,group]))
+  #was throwing errors, corrected to 1
+  n=1
+
+  #make a violin plot
+  a = VlnPlot(seurat_object,metric,group.by = group,pt.size = 0,log = F,cols = rep("lightgrey",n)) + scale_fill_manual(values="lightgrey")
+
+  #make a simple function that quantifies percentiles for each column
+  add.percentiles = function(x) {
+    r = quantile(x, probs = seq(0,1,0.2))
+    r
+  }
+
+  a + geom_boxplot(width = 0.05,outlier.size = 0,notchwidth = 10,notch = F) + theme_bw() + stat_summary(fun=add.percentiles, geom="point", pch="_", colour=c(rep(c("red3","purple","yellow","forestgreen","darkblue","grey"),n)), size=10)
+}
+```
+
+Plot each metric. Red = 0%, Purple = 20%, Yellow = 40%, Black = 50%,Green = 60%, Blue = 80%, Grey = 100% percentile
+```{r}
+#Save graphs
+for (i in m){
+  graph = anno_vln(metric = i)
+  setEPS()
+  postscript(file.path(dir,QCfolder,paste0(i,project,".eps")))
+  print(graph)
+  dev.off()
+}
+
+#print graphs to console
+for (i in m){
+  graph = anno_vln(metric = i)
+  print(graph)
+}
+```
+
+
+Plot the number of cells each gene is represented by - i.e. how many cells express any given gene? Ordered from rare to common genes. So you might consider focusing on genes that are relatively well expressed across the sample, or you might care about genes expressed only in a small subset of cells. The >=2 refers to read number per cell. 
+```{r}
+plot(sort(Matrix::rowSums(GetAssayData(sobject.merge)>=2)),xlab="gene rank",ylab="number of cells",main="Cells per genes ( >= 2 )")
+```
+
+A. Gene Plot, scatter plot of gene expression across cells, (colored by sample) - sequencing depth relative to genes; looking for similarity across samples. Some cell types can have relatively few genes, but highly expressed, could show up as a second arc below the one seen here (should contain all samples though)
+B. % Mitochondrial RNA vs Feature counts
+```{r}
+Idents(sobject.merge) = "subsample"
+#Save graphs
+for (i in 1:(length(m)-1)){
+  graph = FeatureScatter(sobject.merge,m[i],m[i+1])+ theme_bw()
+  setEPS()
+  postscript(file.path(dir,QCfolder,paste0(m[i],"_",m[i+1],project,"scatter.eps")))
+  print(graph)
+  dev.off()
+}
+
+#print graphs
+for (i in 1:(length(m)-1)){
+  graph = FeatureScatter(sobject.merge,m[i],m[i+1])+ theme_bw()
+  print(graph)
+}
+```
+Set limits based on the graphs
+```{r}
+mlo = 0.0000
+mhi = quantile(sobject.merge$percent.mito, 0.975)
+clo = quantile(sobject.merge$nCount_RNA, 0.025)
+chi = quantile(sobject.merge$nCount_RNA, 0.975)
+flo = quantile(sobject.merge$nFeature_RNA, 0.025) 
+fhi = quantile(sobject.merge$nFeature_RNA, 0.975) 
+```
+
+Violin plot of 1) number of genes, 2) number of UMI and 3) percent mitochondrial genes; save with lines that show cutoffs
+
+```{r}
+group = "sample_description"
+#Make a table with your cutoff values
+tablelow = c(clo,flo,mlo)
+tablehigh = c(chi,fhi,mhi)
+t = as.data.frame(rbind(tablelow,tablehigh))
+colnames(t) = m
+
+
+#save graphs
+for (i in 1:ncol(t)){
+  metric = colnames(t)[i]
+  low = t[1,i]
+  high = t[2,i]
+  graph = anno_vln(metric = metric) + geom_abline(intercept = high, slope = 0, linetype = "dashed",color = "red", size = 0.8) + geom_abline(intercept = low, slope = 0, linetype = "dashed",color = "black", size = .8)
+  setEPS()
+  postscript(file.path(dir,QCfolder,paste0(colnames(t)[i],project,"withcutoffs.eps")))
+  print(graph)
+  dev.off()
+}
+
+#print graphs
+for (i in 1:ncol(t)){
+   metric = colnames(t)[i]
+  low = t[1,i]
+  high = t[2,i]
+  graph = anno_vln(metric = metric) + geom_abline(intercept = high, slope = 0, linetype = "dashed",color = "red", size = 0.8) + geom_abline(intercept = low, slope = 0, linetype = "dashed",color = "black", size = .8)
+  print(graph)
+}
+
+```
+
+
+Scatter plots with lines to show cutoffs
+```{r}
+#Save graphs
+for (i in 1:(length(colnames(t))-1)){
+  xm = colnames(t)[i]
+  ym = colnames(t)[i+1]
+  xlow = t[1,i]
+  xhigh = t[2,i]
+  ylow = t[1,i+1]
+  yhigh = t[2,i+1]
+  graph = FeatureScatter(sobject.merge,xm,ym)+ theme_bw() + geom_vline(xintercept = xlow, linetype = "dashed",color = "black", size = .8) + geom_vline(xintercept = xhigh, linetype = "dashed",color = "red", size = .8)+ geom_hline(yintercept = ylow, linetype = "dashed",color = "black", size = .8)  + geom_hline(yintercept = yhigh, linetype = "dashed",color = "red", size = .8)
+  setEPS()
+  postscript(file.path(dir,QCfolder,paste0(m[i],"_",m[i+1],project,"scatter_withcutoffs.eps")))
+  print(graph)
+  dev.off()
+}
+
+#print graphs
+for (i in 1:(length(colnames(t))-1)){
+  xm = colnames(t)[i]
+  ym = colnames(t)[i+1]
+  xlow = t[1,i]
+  xhigh = t[2,i]
+  
+  ylow = t[1,i+1]
+  yhigh = t[2,i+1]
+  
+  graph = FeatureScatter(sobject.merge,xm,ym)+ theme_bw() + geom_vline(xintercept = xlow, linetype = "dashed",color = "black", size = .8) + geom_vline(xintercept = xhigh, linetype = "dashed",color = "red", size = .8)+ geom_hline(yintercept = ylow, linetype = "dashed",color = "black", size = .8)  + geom_hline(yintercept = yhigh, linetype = "dashed",color = "red", size = .8)
+  print(graph)
+}
+```
+
+Filtering cells: note that they are taking these filters and duplicating them across all samples. Use -Inf instead of 0 because not all the filters have to be positive values, and to avoid any errors due to truncation. 
+
+How to select filters??? noise vs signal - get them from the violin plots and the matrix, capture the bulk of cells but exclude outliers (say with mtDNA filter) - can also look at percentiles, maybe get rid of top 5% since it was very different from the rest. Basically eliminate outliers and don't include cells that have hardly any genes or have a ton of genes expressed. First save the original object: 
+
+```{r}
+save(sobject,file = file.path(dir,"Data/Seurat",paste0(project,"_beforeQC.RData")))
+```
+
+Subset the data. Printing tables lets you see the progression as you tighten your QC cutoffs. 
+```{r}
+print("initial")
+table(sobject.merge$sampleid) #print out initial cell counts
+sobject.merge = subset(sobject.merge, subset = percent.mito>mlo & percent.mito < mhi) #subset mitochondria
+print("mito")
+table(sobject.merge$sampleid) #new cell counts
+sobject.merge = subset(sobject.merge, subset = nCount_RNA>clo & nCount_RNA < chi)
+print("ncount")
+table(sobject.merge$sampleid)
+sobject.merge = subset(sobject.merge, subset = nFeature_RNA>flo & nFeature_RNA < chi)
+print("nfeature")
+table(sobject.merge$sampleid)
+```
+
+```{r}
+save(sobject.merge, file = file.path(dir,"Data/Seurat",paste0(project,"_filtered.RData")))
+```
