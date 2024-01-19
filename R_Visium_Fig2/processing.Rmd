@@ -1,0 +1,2593 @@
+---
+title: "Processing"
+author: "Nathan Ewing-Crystal"
+date: "10/27/2022"
+output: html_document
+---
+
+#
+Seurat information from https://satijalab.org/seurat/articles/spatial_vignette.html
+Other code from Leah Dorman
+
+```{r}
+#install.packages('Seurat', dependencies=TRUE)
+library(Seurat)
+#install.packages('ggplot2')
+library(ggplot2)
+#install.packages('ggpubr')
+library(ggpubr)
+#install.packages('dplyr')
+library(dplyr)
+#install.packages('ape')
+library(ape)
+#install.packages('cowplot')
+library(cowplot)
+#install.packages('Matrix')
+library(Matrix)
+#install.packages('EnhancedVolcano')
+library(EnhancedVolcano)
+#install.packages('knitr')
+library(knitr)
+#install.packages('readr')
+library(readr)
+#if (!require("BiocManager", quietly = TRUE))
+#     install.packages("BiocManager")
+#BiocManager::install("MAST")
+library(MAST)
+#install.packages('gplots')
+library(gplots)
+#BiocManager::install("EnhancedVolcano")
+library(EnhancedVolcano)
+
+#BiocManager::install("goseq")
+library(goseq)
+#BiocManager::install("TxDb.Mmusculus.UCSC.mm10.ensGene")
+library(TxDb.Mmusculus.UCSC.mm10.ensGene)
+
+#install.packages("formattable")
+library(formattable)
+
+#BiocManager::install("clusterProfiler")
+library(clusterProfiler)
+#install.packages("ggnewscale")
+library(ggnewscale)
+
+#install.packages("remotes")
+#remotes::install_github("immunogenomics/presto")
+library(presto)
+#install.packages("msigdbr")
+library(msigdbr)
+#BiocManager::install("fgsea")
+library(fgsea)
+#install.packages("tibble")
+library(tibble)
+#BiocManager::install("reactome.db")
+library(reactome.db)
+library(RColorBrewer)
+```
+
+*Edit the following code every time* 
+and make sure the folders "QC" and "Plots" and "Heatmaps" and "Trees" and "Spreadsheets" and "Data/Seurat" are present in the "dir" folder
+```{r}
+#Specify your preferred directory for all input + output
+# dir="/mnt/DATA/molofsky_lab/newing-crystal/Visium/Seurat/"
+dir = "/Users/nathanewing-crystal/Ari Molofsky Lab Dropbox/Ari Molofsky Lab Team Folder/Nathan Ewing-Crystal/RNASeq/Visium/Seurat"
+setwd(dir)
+
+#Specify exactly where your seurat files live
+datafolder = "Data"
+
+#This name needs to match your project name within the seurat object
+project<-"visium" 
+
+#set up folders
+QCfolder = "QC"
+Plotfolder = "Plots"
+
+#Important genes to determine your cells of interest
+igenes = c("Col1a1", "Pdgfra", "Pdgfrb", "Dcn", "Gfap", "Olig2", "Ptprc", "Itgam", "Des")
+
+#make a unique name; maybe this is the celltype you've already subset, or the age you're looking at, etc.
+iterationname = "v1"
+
+#Establish cutoffs for heatmaps
+pval = 1e-3 #max p-value for significance
+lfc = 0.2 #minimum log fold change
+minpct = 0.05 #if you want to subset by percent cells in that cluster expressing the gene
+maxpct = 1
+single = F #should each gene be a marker of a single cluster only
+hgenes = 3 #how many genes should be in the heatmap per cluster
+ncells = 100 #max # of cells per heatmap column
+#column = "sub.cluster" #division you care about
+
+image1 = "A.Rest.2dpi"
+image2 = "B.7dpi"
+image3 = "C.21dpi"
+image4 = "D.21dpi.Deleter"
+```
+********BELOW CODE PERFORMED ON PRESIDIO SERVER********
+
+#Load individual Visium objects into Seurat
+```{r}
+filepath <- file.path("/mnt/DATA/molofsky_lab/newing-crystal/Visium/SpaceRanger/NEC_A1_0-2dpi/outs")
+vobj_A <- Load10X_Spatial(filepath, filename = "filtered_feature_bc_matrix.h5", assay = "Spatial", slice = "A:Rest/2dpi", filter.matrix = TRUE)
+
+VlnPlot(vobj_A, features = "nCount_Spatial", pt.size = 0.1) + NoLegend()
+SpatialFeaturePlot(vobj_A, features = "nCount_Spatial") + theme(legend.position = "right")
+
+vobj_A <- SCTransform(vobj_A, assay = "Spatial", verbose = FALSE)
+
+vobj_A <- RunPCA(vobj_A, assay = "SCT", verbose = FALSE)
+vobj_A <- FindNeighbors(vobj_A, reduction = "pca", dims = 1:30)
+vobj_A <- FindClusters(vobj_A, verbose = FALSE)
+vobj_A <- RunUMAP(vobj_A, reduction = "pca", dims = 1:30)
+
+p1 <- DimPlot(vobj_A, reduction = "umap", label = TRUE)
+p2 <- SpatialDimPlot(vobj_A, label = TRUE, label.size = 3)
+p1 + p2
+```
+
+```{r}
+filepath <- file.path("/mnt/DATA/molofsky_lab/newing-crystal/Visium/SpaceRanger/NEC_B1_7dpi/outs")
+vobj_B <- Load10X_Spatial(filepath, filename = "filtered_feature_bc_matrix.h5", assay = "Spatial", slice = "B:7dpi", filter.matrix = TRUE)
+
+VlnPlot(vobj_B, features = "nCount_Spatial", pt.size = 0.1) + NoLegend()
+SpatialFeaturePlot(vobj_B, features = "nCount_Spatial") + theme(legend.position = "right")
+
+vobj_B <- SCTransform(vobj_B, assay = "Spatial", verbose = FALSE)
+
+vobj_B <- RunPCA(vobj_B, assay = "SCT", verbose = FALSE)
+vobj_B <- FindNeighbors(vobj_B, reduction = "pca", dims = 1:30)
+vobj_B <- FindClusters(vobj_B, verbose = FALSE)
+vobj_B <- RunUMAP(vobj_B, reduction = "pca", dims = 1:30)
+
+p1 <- DimPlot(vobj_B, reduction = "umap", label = TRUE)
+p2 <- SpatialDimPlot(vobj_B, label = TRUE, label.size = 3)
+p1 + p2
+```
+
+```{r}
+filepath <- file.path("/mnt/DATA/molofsky_lab/newing-crystal/Visium/SpaceRanger/NEC_C1_21dpi/outs")
+vobj_C <- Load10X_Spatial(filepath, filename = "filtered_feature_bc_matrix.h5", assay = "Spatial", slice = "C:21dpi", filter.matrix = TRUE)
+
+VlnPlot(vobj_C, features = "nCount_Spatial", pt.size = 0.1) + NoLegend()
+SpatialFeaturePlot(vobj_C, features = "nCount_Spatial") + theme(legend.position = "right")
+
+##some spots have 0 UMIs
+# AACGTCATCCGGCTTG-1 AGCGACTTTGAAGACA-1 CTTTATCCGACGCATG-1 TGGATGGCATCTTGGA-1 
+#                 70                339               1082               1982 
+
+#filter
+
+vobj_C_subset <- subset(vobj_C, cells = which(vobj_C$nCount_Spatial != 0))
+vobj_C_subset <- SCTransform(vobj_C_subset, assay = "Spatial", verbose = FALSE)
+
+vobj_C_subset <- RunPCA(vobj_C_subset, assay = "SCT", verbose = FALSE)
+vobj_C_subset <- FindNeighbors(vobj_C_subset, reduction = "pca", dims = 1:30)
+vobj_C_subset <- FindClusters(vobj_C_subset, verbose = FALSE)
+vobj_C_subset <- RunUMAP(vobj_C_subset, reduction = "pca", dims = 1:30)
+
+p1 <- DimPlot(vobj_C_subset, reduction = "umap", label = TRUE)
+p2 <- SpatialDimPlot(vobj_C_subset, label = TRUE, label.size = 3)
+p1 + p2
+```
+
+```{r}
+filepath <- file.path("/mnt/DATA/molofsky_lab/newing-crystal/Visium/SpaceRanger/NEC_D1_21dpi_deleter/outs")
+vobj_D <- Load10X_Spatial(filepath, filename = "filtered_feature_bc_matrix.h5", assay = "Spatial", slice = "D:21dpi Deleter", filter.matrix = TRUE)
+
+VlnPlot(vobj_D, features = "nCount_Spatial", pt.size = 0.1) + NoLegend()
+SpatialFeaturePlot(vobj_D, features = "nCount_Spatial") + theme(legend.position = "right")
+
+vobj_D <- SCTransform(vobj_D, assay = "Spatial", verbose = FALSE)
+
+vobj_D <- RunPCA(vobj_D, assay = "SCT", verbose = FALSE)
+vobj_D <- FindNeighbors(vobj_D, reduction = "pca", dims = 1:30)
+vobj_D <- FindClusters(vobj_D, verbose = FALSE)
+vobj_D <- RunUMAP(vobj_D, reduction = "pca", dims = 1:30)
+
+p1 <- DimPlot(vobj_D, reduction = "umap", label = TRUE)
+p2 <- SpatialDimPlot(vobj_D, label = TRUE, label.size = 3)
+p1 + p2
+```
+#
+#Merge
+```{r}
+vobj_A$orig.ident <- "Rest, 2dpi"
+vobj_B$orig.ident <- "7dpi"
+vobj_C_subset$orig.ident <- "21dpi"
+vobj_D$orig.ident <- "21dpi Deleter"
+
+vobj.merge_ab <- merge(vobj_A, vobj_B)
+vobj.merge_abc <- merge(vobj.merge_ab, vobj_C_subset)
+vobj.merge <- merge(vobj.merge_abc, vobj_D)
+
+VlnPlot(vobj.merge, features = "nCount_Spatial", pt.size = 0.1) + NoLegend()
+SpatialFeaturePlot(vobj.merge, features = "nCount_Spatial") + theme(legend.position = "right")
+
+DefaultAssay(vobj.merge) <- "SCT"
+VariableFeatures(vobj.merge) <- c(VariableFeatures(vobj_A), VariableFeatures(vobj_B), VariableFeatures(vobj_C_subset), VariableFeatures(vobj_D))
+vobj.merge <- RunPCA(vobj.merge, verbose = FALSE)
+vobj.merge <- FindNeighbors(vobj.merge, dims = 1:30)
+vobj.merge <- FindClusters(vobj.merge, verbose = FALSE)
+vobj.merge <- RunUMAP(vobj.merge, dims = 1:30)
+```
+
+```{r}
+DimPlot(vobj.merge, reduction = "umap", group.by = c("ident", "orig.ident"))
+```
+
+
+
+
+
+
+Function to print multiple graphs: 
+```{r}
+PrintSeuratGraph = function(namecard = "a",seurat_object = vobj.merge,graphtype = "feature",feature = NULL,group = NULL,split=NULL,cellnames=NULL, label=FALSE, images=NULL){
+  if (!is.null(cellnames)){
+    Idents(seurat_object) = cellnames[1]
+    cells = colnames(seurat_object)[Idents(seurat_object) %in% cellnames[2:length(cellnames)]]} 
+  else {cells = cellnames}
+  if (graphtype == "feature"){
+    graph = FeaturePlot(seurat_object,features = feature,split.by = split, cells = cells,cols = c("lightyellow","darkred"))
+  }
+  if (graphtype == "violin"){
+    graph = VlnPlot(seurat_object,features = feature, pt.size = 0.1, idents = cellnames[2:length(cellnames)],group.by = group, split.by = split)
+  }
+  if (graphtype == "dim"){
+    graph = DimPlot(seurat_object,cells = cells, group.by = group, split.by = split, label=label)
+    
+  }
+  if (graphtype == "spatialfeature"){
+    graph = SpatialFeaturePlot(seurat_object,features = feature,images=images)
+  }
+   if (graphtype == "spatialdim"){
+    graph = SpatialDimPlot(seurat_object,cells = cells, group.by = group, label=label)
+  }
+  name = paste0(feature,"_",graphtype,namecard,".eps")
+  graph
+  setEPS()
+  postscript(file.path(dir,Plotfolder,name))
+  print(graph)
+  dev.off()
+}
+```
+
+Block to print multiple graphs: 
+```{r}
+name = paste0(project,iterationname)
+genes = igenes
+genes = genes[genes %in% rownames(GetAssayData(vobj.merge,slot = "data"))]
+
+for(feature in genes){
+  PrintSeuratGraph(namecard = name,graphtype = "feature",feature = feature)
+  PrintSeuratGraph(namecard = name,graphtype = "spatialfeature",feature = feature)
+}
+
+
+#dim plots for clustering
+PrintSeuratGraph(namecard = name,graphtype = "dim", label=TRUE)
+PrintSeuratGraph(namecard = paste0(name, "_grouped") ,graphtype = "dim", group = "orig.ident")
+PrintSeuratGraph(namecard = name,graphtype = "spatialdim", legend=FALSE)
+
+#violin plots
+for(feature in genes){
+  PrintSeuratGraph(namecard = name,graphtype = "violin",feature = feature,group = "seurat_clusters")
+}
+
+SpatialDimPlot(vobj.merge)
+
+```
+
+```{r}
+#Find all markers (method 1 from tutorial)
+
+markers_all = FindAllMarkers(
+   object = vobj.merge,
+   assay = "Spatial",
+   features = rownames(vobj.merge),
+   test.use = "MAST", 
+   only.pos = FALSE, 
+   min.pct = 0.05, 
+   logfc.threshold = 0.2)
+
+write.csv(markers_all, paste0(dir, "Tables/markers_all.csv"))
+```
+
+
+```{r}
+#Find spatially variable markers (method 2 from tutorial)
+#NOTE - currently not working
+
+vobj.merge <- FindSpatiallyVariableFeatures(vobj.merge, assay = "SCT", features = VariableFeatures(vobj.merge), selection.method = "markvariogram")
+
+top.features <- head(SpatiallyVariableFeatures(vobj.merge, selection.method = "markvariogram"), 6)
+SpatialFeaturePlot(vobj.merge, features = top.features, ncol = 1)
+```
+
+
+```{r}
+save(vobj.merge,file = file.path(dir, datafolder,paste0(project,"_vobj.merge_",iterationname,".RData")))
+
+#CHANGE DATE AS NECESSARY
+save.image(file = file.path(dir, datafolder, "workspace.20221028.Rdata"))
+```
+
+********BELOW CODE PERFORMED locally********
+
+```{r}
+filename = "/Users/nathanewing-crystal/Dropbox (Ari Molofsky Lab)/Ari Molofsky Lab Team Folder/Nathan Ewing-Crystal/RNASeq/Visium/Seurat/Data/visium_vobj.merge_v1.RData"
+load(file.path(filename))
+```
+```{r}
+p1 <- SpatialDimPlot(vobj.merge.sub10, images = image1, pt.size.factor = 0.5) + theme(legend.position = "none")
+p2 <- SpatialDimPlot(vobj.merge.sub10, images = image2, pt.size.factor = 0.5) + theme(legend.position = "none")
+p3 <- SpatialDimPlot(vobj.merge.sub10, images = image3, pt.size.factor = 0.5) + theme(legend.position = "none")
+p4 <- SpatialDimPlot(vobj.merge.sub10, images = image1) + theme(legend.position = "none")
+p5 <- SpatialDimPlot(vobj.merge.sub10, images = image2) + theme(legend.position = "none")
+p6 <- SpatialDimPlot(vobj.merge.sub10, images = image3) + theme(legend.position = "none")
+Plotfolder = "Plots"
+setEPS()
+postscript(file.path(dir, Plotfolder, "small_dots_spatial.eps"))
+p1+p2+p3
+dev.off()
+setEPS()
+postscript(file.path(dir, Plotfolder, "big_dots_spatial.eps"))
+p4+p5+p6
+dev.off()
+```
+
+
+#Make plots for chemokines, cytokines, Tgfb related genes - replicate cloupe analysis
+```{r}
+name = paste0(project,iterationname)
+
+chemokines = c("Ccl2", "Ccl3", "Ccl4", "Ccl6", "Ccl9", "Ccl19", "Ccl8", "Cxcl12", "Cxcl16", "Cxcl5")
+cytokines = c("Il7", "Il15", "Igf1", "Igf2", "Il33")
+misc_immune = c("H2a-aa", "Arg1", "Ccr2", "Cd3e", "Pdcd1", "Cd69")
+tgfb = c("Tgfb1", "Tgfb2", "Tgfb3", "Tgfbr1", "Tgfbr2", "Itgav", "Itgb1", "Itgb8")
+
+genelists = list(chemokines, cytokines, misc_immune, tgfb)
+genelist_names = c("chemokines", "cytokines", "misc_immune", "tgfb")
+
+
+i=1
+for(list in genelists){
+
+  list_name = genelist_names[i]
+  i=i+1
+  
+  genes = list
+  genes = list[list %in% rownames(GetAssayData(vobj.merge,slot = "data"))]
+  
+  for(feature in genes){
+    Plotfolder = paste0("Plots/", list_name)
+    PrintSeuratGraph(namecard = name,graphtype = "spatialfeature",feature = feature, images=c(image1, image2, image3))
+  }
+}
+```
+#Parse fibroblast expressing clusters (differences over time) - replicate cloupe analysis
+```{r}
+Plotfolder = "Plots/fibroblast_parsing"
+
+Idents(vobj.merge) = vobj.merge$seurat_clusters
+p1 <- DimPlot(vobj.merge, group.by = "orig.ident")
+p2 <- DimPlot(vobj.merge, group.by= "ident")
+p3 <- FeaturePlot(vobj.merge, feature="Col1a2")
+p4 <- FeaturePlot(vobj.merge, feature="Gfap")
+
+name = "fibroblast_vs_gfap.eps"
+
+p1+p2+p3+p4
+setEPS()
+postscript(file.path(dir,Plotfolder,name))
+print(p1+p2+p3+p4)
+dev.off()
+
+p5 <- VlnPlot(vobj.merge, feature = "Col1a2") + theme(legend.position = "none") + theme(axis.text = element_text(size = 7))  
+
+col_clusters = c(3, 8, 10, 13, 17, 18)
+for(cluster in col_clusters){
+    name = paste0("cluster_", cluster, ".eps")
+
+    p6 <- DimPlot(vobj.merge, cells.highlight=CellsByIdentities(object = vobj.merge,idents = cluster)) + theme(legend.position = "top")
+
+    p7 <- DimPlot(subset(vobj.merge, subset = orig.ident %in% c("Rest, 2dpi", "7dpi", "21dpi")), cells.highlight=CellsByIdentities(object = vobj.merge,idents = cluster), split.by = "orig.ident") + theme(legend.position = "none")
+  #change order of factor levels --> plot from 2dpi to 21dpi
+  p7$data$orig.ident <- factor(x = p7$data$orig.ident, levels = c("Rest, 2dpi", "7dpi", "21dpi"))
+
+  p8 <- SpatialDimPlot(vobj.merge, cells.highlight=CellsByIdentities(object = vobj.merge,idents = cluster), images=c(image1, image2, image3)) + theme(legend.position = "none")
+  
+  setEPS()
+  postscript(file.path(dir,Plotfolder,name))
+  print(
+    ggarrange(ggarrange(p5, p6, ncol=2, nrow=1),
+              p7, p8, ncol=1, nrow=3))
+  dev.off()
+}
+
+#parse by timepoint
+#NOTE - here, using 
+Idents(vobj.merge) = "seurat_clusters"
+for(cluster in col_clusters){
+  name = paste0("cluster_", cluster, "_timepoint.eps")
+  p12 <- DimPlot(subset(vobj.merge, subset = orig.ident %in% c("Rest, 2dpi", "7dpi", "21dpi")), cells.highlight=CellsByIdentities(object = vobj.merge,idents = cluster), split.by = "timepoint") + theme(legend.position = "none")
+  #change order of factor levels --> plot from 2dpi to 21dpi
+  p12$data$timepoint <- factor(x = p12$data$timepoint, levels = c("Rest", "2dpi", "7dpi", "21dpi"))
+  setEPS()
+  postscript(file.path(dir,Plotfolder,name), height = 2.5)
+  print(p12)
+  dev.off()
+}
+```
+
+#Subcluster cluster 10
+```{r}
+vobj.merge.sub10 <- FindSubCluster(
+  vobj.merge,
+  10,
+  graph.name = "SCT_snn",
+  subcluster.name = "sub.cluster",
+  resolution = 0.5,
+  algorithm = 1
+)
+
+vobj.merge.sub10 <- SetIdent(vobj.merge.sub10, value = vobj.merge.sub10@meta.data$sub.cluster)
+DimPlot(vobj.merge.sub10, label = TRUE)
+
+#Subset to new seurat object with only cluster 10
+vobj.merge.sub10 <- SetIdent(vobj.merge.sub10, value = vobj.merge.sub10@meta.data$seurat_clusters)
+sub10 <- subset(vobj.merge.sub10, idents = 10)
+
+vobj.merge.sub10 <- SetIdent(vobj.merge.sub10, value = vobj.merge.sub10@meta.data$sub.cluster)
+subclusters <- c("10_0", "10_1", "10_2", "10_3", "10_4")
+
+sub10 <- SetIdent(sub10, value = sub10@meta.data$sub.cluster)
+  
+p5 <- VlnPlot(sub10, feature = "Col1a2") + theme(legend.position = "none") + theme(axis.text = element_text(size = 7))  
+
+for(subcluster in subclusters){
+   name = paste0("spatialdim_cluster_", subcluster, ".eps")
+   setEPS()
+   postscript(file.path(dir,Plotfolder,name))
+   print(
+     SpatialDimPlot(vobj.merge.sub10, cells.highlight=CellsByIdentities(object = vobj.merge.sub10,idents = subcluster), images = image2))
+  dev.off()
+}
+
+for(subcluster in subclusters){
+    name = paste0("cluster_", subcluster, ".eps")
+
+    p6 <- DimPlot(vobj.merge.sub10, cells.highlight=CellsByIdentities(object = vobj.merge.sub10,idents = subcluster)) + theme(legend.position = "top")
+
+    p7 <- DimPlot(subset(vobj.merge.sub10, subset = orig.ident %in% c("Rest, 2dpi", "7dpi", "21dpi")), cells.highlight=CellsByIdentities(object = vobj.merge.sub10,idents = subcluster), split.by = "orig.ident") + theme(legend.position = "none")
+  #change order of factor levels --> plot from 2dpi to 21dpi
+  p7$data$orig.ident <- factor(x = p7$data$orig.ident, levels = c("Rest, 2dpi", "7dpi", "21dpi"))
+
+  p8 <- SpatialDimPlot(vobj.merge.sub10, cells.highlight=CellsByIdentities(object = vobj.merge.sub10,idents = subcluster), images=c(image1, image2, image3)) + theme(legend.position = "none")
+  
+  setEPS()
+  postscript(file.path(dir,Plotfolder,name))
+  print(
+    ggarrange(ggarrange(p5, p6, ncol=2, nrow=1),
+              p7, p8, ncol=1, nrow=3))
+  dev.off()
+}
+
+subcluster <- subclusters[1]
+
+p9 <- DimPlot(sub10, reduction = "umap", label = TRUE, label.size = 6)
+p10 <- SpatialDimPlot(vobj.merge.sub10, images = image2)
+p11 <- DimPlot(sub10, reduction = "umap", label = TRUE, label.size = 6, cells.highlight=CellsByIdentities(object = sub10, idents = subcluster))
+
+name = "sub10.eps"
+setEPS()
+postscript(file.path(dir,Plotfolder,name))
+print(ggarrange(p9, p10, ncol=1, nrow=2))
+dev.off()
+
+name = "sub10_0.eps"
+setEPS()
+postscript(file.path(dir,Plotfolder,name))
+print(ggarrange(p9, p11, ncol=1, nrow=2))
+dev.off()
+
+name = "sub10_0_timepoint.eps"
+p12 <- DimPlot(subset(vobj.merge.sub10, subset = orig.ident %in% c("Rest, 2dpi", "7dpi", "21dpi")), cells.highlight=CellsByIdentities(object = vobj.merge.sub10,idents = subcluster), split.by = "timepoint") + theme(legend.position = "none")
+  #change order of factor levels --> plot from 2dpi to 21dpi
+p12$data$timepoint <- factor(x = p12$data$timepoint, levels = c("Rest", "2dpi", "7dpi", "21dpi"))
+setEPS()
+postscript(file.path(dir,Plotfolder,name), height = 2.5)
+print(p12)
+dev.off()
+```
+
+*Heatmap for cytokines/cheommkines at various timepoints*
+```{r}
+Idents(vobj.merge.sub10) = "timepoint"
+avgexp <- AverageExpression(vobj.merge.sub10, return.seurat = TRUE, verbose = TRUE)
+Idents(vobj.merge.sub10) = "fib.timepoint"
+avgexp.sub <- AverageExpression(vobj.merge.sub10, return.seurat = TRUE, verbose = TRUE)
+#reorder levels
+my_levels = c("3", "6", "12", "21", "11", "20", "0", "17", "16", "9", "19", "5", "2", "4", "10_1", "22", "10_4", "1", "18", "7dpi", "21dpi", "14", "13", "23", "15", "10_2", "10_3", "7")
+levels(avgexp.sub) = my_levels
+
+#chemokines = c("Ccl2", "Ccl3", "Ccl4", "Ccl6", "Ccl9", "Ccl8", "Ccl19", "Cxcl12", "Cxcl16", "Cxcl14", "Cxcl9", "Cxcl10", "Cxcl13", "Ccl12", "Ccl27", "Ccl5", "Cx3cl1")
+#reorder to group by timepoint
+chemokines = c("Cx3cl1", "Cxcl14", "Ccl12", "Ccl2", "Ccl9", "Cxcl13", "Ccl6", "Ccl4", "Ccl3", "Cxcl10", "Cxcl9", "Ccl5", "Cxcl16", "Ccl19", "Ccl8", "Cxcl12")
+cytokines = c("Il18", "Vegfa", "Il33", "Csf1", "Il15", "Il16", "Igf1", "Igf2", "Il7")
+
+
+chemokines.sub = c("Ccl12", "Ccl2", "Ccl9", "Ccl4", "Ccl3", "Cxcl10", "Ccl6", "Ccl5", "Ccl19", "Cxcl9", "Cxcl16", "Ccl8", "Cxcl12")
+cytokines.sub = c("Il18", "Vegfa", "Il33", "Csf1", "Il16", "Il15", "Igf2", "Igf1", "Il7")
+
+Plotfolder = "Plots/chemokines" 
+name = "chemokines"
+#Make heatmap
+setEPS()
+postscript(file.path(dir,Plotfolder, paste0(name, "_heatmap.eps")))
+DoHeatmap(
+    object = avgexp, 
+    features = chemokines,
+    size = 5,
+    label = T,
+    raster = F,
+    draw.lines = F) + scale_fill_gradientn(colors = rev(RColorBrewer::brewer.pal(n =4, name = "RdBu")))
+dev.off()
+
+Plotfolder = "Plots/cytokines" 
+name = "cytokines"
+#Make heatmap
+setEPS()
+postscript(file.path(dir,Plotfolder, paste0(name, "_heatmap.eps")))
+DoHeatmap(
+    object = avgexp, 
+    features = cytokines,
+    size = 5,
+    label = T,
+    raster = F,
+    draw.lines = F) + scale_fill_gradientn(colors = rev(RColorBrewer::brewer.pal(n =4, name = "RdBu")))
+dev.off
+
+Plotfolder = "Plots/chemokines" 
+name = "chemokines_fib"
+#Make heatmap
+setEPS()
+postscript(file.path(dir,Plotfolder, paste0(name, "_heatmap.eps")))
+DoHeatmap(
+    object = avgexp.sub,
+    cells = c("7dpi", "21dpi"),
+    features = chemokines.sub,
+    size = 5,
+    label = T,
+    raster = F,
+    draw.lines = F) + scale_fill_gradientn(colors = rev(RColorBrewer::brewer.pal(n =4, name = "RdBu")))
+dev.off()
+
+Plotfolder = "Plots/cytokines" 
+name = "cytokines_fib"
+#Make heatmap
+setEPS()
+postscript(file.path(dir,Plotfolder, paste0(name, "_heatmap.eps")))
+DoHeatmap(
+    object = avgexp.sub, 
+    cells = c("7dpi", "21dpi"),
+    features = cytokines.sub,
+    size = 5,
+    label = T,
+    raster = F,
+    draw.lines = F) + scale_fill_gradientn(colors = rev(RColorBrewer::brewer.pal(n =4, name = "RdBu")))
+dev.off
+```
+
+
+
+***COMPARE FIBROBLASTS 7 vs. 21dpi***
+
+#Get subset markers for 21dpi vs. 7dpi fibroblasts
+```{r}
+#scale RNA assay data
+
+DefaultAssay(vobj.merge.sub10) <- "Spatial"
+vobj.merge.sub10 <- NormalizeData(vobj.merge.sub10)
+vobj.merge.sub10 <- ScaleData(vobj.merge.sub10)
+
+vobj.merge.sub10 <- SetIdent(vobj.merge.sub10, value = vobj.merge.sub10@meta.data$sub.cluster)
+cluster1 = "8"
+cluster2 = "10_0"
+
+#Find markers based on scaled Spatial assay
+markers_7vs21_fib = FindMarkers(
+  object = vobj.merge.sub10,
+  assay = "Spatial",
+  ident.1 = cluster1,
+  ident.2 = cluster2,
+  test.use = "MAST",
+  only.pos = FALSE,
+  min.pct = 0.05,
+  logfc.threshold = 0.2)
+
+write.csv(markers_7vs21_fib, paste0(dir, "/Tables/markers_7-vs-21-fib.csv"))
+```
+*Volcano Plot*
+7 vs. 21dpi
+
+Set your parameters
+```{r}
+#Minimum fold change (i.e. 1.15 = 15% increase)
+minfc = 1.15
+#Max adj. p value
+alpha = 0.05
+#Genes to highlight
+ngenes = 50
+
+defile = "markers_7-vs-21-fib.csv"
+
+#Comparison being made (must match file names)
+comparison = "markers_7-vs-21-fib"
+
+newlist=list(de)
+de = read.csv(file.path(dir,"Tables", defile),stringsAsFactors = F) #any   spreadsheet with gene symbols or other identifiers
+colnames(de)[1] = "Gene"
+
+#NOTE: generated from "DEG_analysis" script
+fc = de
+fc = fc[!is.na(fc$avg_log2FC),]
+colorkeysdown = fc$Gene[fc$avg_log2FC < -log2(minfc) & fc$p_val_adj < alpha]
+colorkeysup = fc$Gene[fc$avg_log2FC > log2(minfc) & fc$p_val_adj < alpha]
+
+#Either highlight specific genes or pick the top genes in colorkeysup/down
+top = fc[fc$p_val_adj<alpha,]
+top = top[order(top$avg_log2FC),"Gene"]
+highlight_top = c(head(top,ngenes),tail(top,ngenes))
+highlight_immune = c("Cxcl12",  "Ccl3", "Ccl2", "Ccl4", "Ifit3", "Itgam", "C3", "Ptgds", "Il1rn", "Irf7", "Ifitm2", "Ifit3b", "Ifit1", "Ifitm3", "Ifit2","Ccl12", "Ccl9", "Ccl7", "Csf1", "H2-Aa", "Spp1")
+highlight_fib = c("Mki67", "Cthrc1", "Lrrc15", "Acta2", "Dcn",  "Col1a2", "Lum", "Itgav", "Col6a1", "Col1a1", "Col8a1")
+genelists = list(highlight_immune, highlight_fib, highlight_top)
+names_genelists = c("immune", "fibrosis", "top")
+size_labels = c(4, 4, 2)
+
+allcolors = rep("darkgrey",length(fc$Gene))
+names(allcolors) = fc$Gene
+allcolors[names(allcolors) %in% colorkeysdown] = "red"
+allcolors[names(allcolors) %in% colorkeysup]= "blue"
+names(allcolors)[allcolors == "yellow"] = "labelled"
+names(allcolors)[allcolors == "blue"] = "Enriched  21dpi"
+names(allcolors)[allcolors == "darkgrey"] = "-"
+names(allcolors)[allcolors == "red"] = "Enriched 7dpi"
+boxed_labels = c(T, T, F)
+  
+#manual label
+name = "Fibroblasts 7 vs. 21dpi"
+range = max(max(fc$avg_log2FC), min(fc$avg_log2FC))
+if(is.infinite(range)){range = 150}
+
+for(i in 1:length(names_genelists)){
+  setEPS()
+  postscript(file.path(dir,"Plots/fibroblast_parsing",paste0("Volcano_",comparison,"_", names_genelists[i], ".eps")))
+  print(EnhancedVolcano(fc,
+              lab = fc$Gene,
+              x = 'avg_log2FC',
+              y = 'p_val_adj',
+              xlim = c(-range, range),
+              title = name,
+              drawConnectors = T,
+              arrowheads = F,
+              legendPosition = 'bottom',
+              pCutoff = alpha,
+              FCcutoff = log2(minfc),
+              selectLab = genelists[[i]],
+              labSize = size_labels[i],
+              pointSize = 0.5,
+              col=c('black', 'black', 'black', 'red3'),
+              colCustom = allcolors,
+              gridlines.major = F,
+              gridlines.minor = F,
+              colAlpha = 1,
+              max.overlaps = 50))
+  dev.off()
+  
+  setEPS()
+  postscript(file.path(dir,"Plots/fibroblast_parsing",paste0("Volcano_",comparison,"_", names_genelists[i], "_large-text.eps")))
+  print(EnhancedVolcano(fc,
+              lab = fc$Gene,
+              x = 'avg_log2FC',
+              y = 'p_val_adj',
+              xlim = c(-range, range),
+              title = name,
+              drawConnectors = T,
+              arrowheads = F,
+              legendPosition = 'bottom',
+              pCutoff = alpha,
+              FCcutoff = log2(minfc),
+              selectLab = genelists[[i]],
+              labSize = 6,
+              pointSize = 0.5,
+              col=c('black', 'black', 'black', 'red3'),
+              colCustom = allcolors,
+              gridlines.major = F,
+              gridlines.minor = F,
+              colAlpha = 1,
+              max.overlaps = 50,
+              boxedLabels = boxed_labels[i]))
+  dev.off()
+}
+
+```
+```{r}
+#fibrosis 7 vs 21dpi final figure
+range_min = min(fc$avg_log2FC)
+range_max = max(fc$avg_log2FC)
+
+setEPS()
+postscript(file.path(dir,"Plots/fibroblast_parsing",paste0("Volcano_",comparison,"_", names_genelists[i], "_large-text_FINAL.eps")))
+print(EnhancedVolcano(fc,
+              lab = NA,
+              x = 'avg_log2FC',
+              y = 'p_val_adj',
+              xlim = c(range_min, range_max),
+              title = name,
+              drawConnectors = T,
+              arrowheads = F,
+              legendPosition = 'bottom',
+              pCutoff = alpha,
+              FCcutoff = log2(minfc),
+              selectLab = genelists[[i]],
+              labSize = 6,
+              pointSize = 0.5,
+              col=c('black', 'black', 'black', 'red3'),
+              colCustom = allcolors,
+              gridlines.major = F,
+              gridlines.minor = F,
+              colAlpha = 1,
+              max.overlaps = 50, min.segment.length = 0.05))
+dev.off()
+```
+
+***Make heatmap using cytokines, chemokines, ECM molecules, and other proteins of interest to determine identities of fibroblast subclusters***
+
+Make the heatmap
+```{r}
+ 
+Plotfolder = "Plots/fibroblast_parsing" 
+
+#cluster2 = 10_0 = 7dpi
+#cluster1 = 8 = 21dpi
+
+#Subset each cluster to ncells
+cellnames = vobj.merge.sub10@meta.data[,"sub.cluster"]
+names(cellnames) = colnames(vobj.merge.sub10)
+cellnames = cellnames[cellnames %in% c(cluster1, cluster2)]
+clusters = levels(as.factor(cellnames))
+newcellnames = NULL
+for (cluster in clusters){
+  n = length(cellnames[cellnames == cluster])
+  if (n > ncells){n = ncells}
+  newcluster = sample(cellnames[cellnames == cluster],n, replace = F)
+  newcellnames = c(newcellnames,newcluster)
+}
+
+#check
+table(newcellnames)
+
+#rename levels: add new metadata column (fib_timepoint) which is sub.cluster, but cluster1 and cluster2 named for their representative timepoints
+fib_timepoint = vobj.merge.sub10@meta.data$sub.cluster
+fib_timepoint[which(fib_timepoint == "10_0")] = "7dpi"
+fib_timepoint[which(fib_timepoint == "8")] = "21dpi"
+vobj.merge.sub10 <- AddMetaData(vobj.merge.sub10, fib_timepoint, col.name = "fib.timepoint")
+Idents(vobj.merge.sub10) <- "fib.timepoint"                 
+
+#reorder levels
+my_levels = c("3", "6", "12", "21", "11", "20", "0", "17", "16", "9", "19", "5", "2", "4", "10_1", "22", "10_4", "1", "18", "7dpi", "21dpi", "14", "13", "23", "15", "10_2", "10_3", "7")
+levels(vobj.merge.sub10) = my_levels
+
+#define features
+genelists = list(highlight_immune, highlight_fib, highlight_top)
+names_genelists = c("immune", "fibrosis", "top")
+
+
+for(i in 1:length(names_genelists)){
+  highlight = genelists[[i]]
+  name = names_genelists[i]
+  
+  highlight = c(highlight[which(highlight %in% colorkeysdown)], highlight[which(highlight %in% colorkeysup)])
+
+  #Make heatmap
+  setEPS()
+  postscript(file.path(dir,Plotfolder, paste0(name, "_heatmap.eps")))
+  DoHeatmap(
+      object = vobj.merge.sub10, 
+      features = highlight,
+      cells = names(newcellnames),
+      size = 5,
+      label = T,
+      draw.lines = T,
+      raster = F
+  )
+  dev.off()
+}
+
+#updated for figure
+Plotfolder = "Plots/figure"
+highlight_fib_2 = c("Fbn2", "Lrrc15", "Acta2", "Mki67", "Cthrc1", "Postn", "Fn1", "Col1a1", "Col1a2", "Tgfbi", "Lum", "Col6a1", "Dcn")
+#Make heatmap
+setEPS()
+postscript(file.path(dir,Plotfolder, paste0(project, iterationname, "_fib_heatmap.eps")), height = 8.5, width = 8.5)
+DoHeatmap(
+    object = vobj.merge.sub10, 
+    features = highlight_fib_2,
+    cells = names(newcellnames),
+    size = 8,
+    label = T,
+    draw.lines = T,
+    raster = F
+) + theme(axis.text.y = element_text(size = 18))
+dev.off()
+```
+***COMPARE FIBROBLASTS VS. ASTROCYTES, 21dpi***
+
+```{r}
+vobj.merge.sub10 <- SetIdent(vobj.merge.sub10, value = vobj.merge.sub10@meta.data$sub.cluster)
+cluster1 = "8"
+cluster2 = "13"
+
+#Find markers based on scaled Spatial assay
+markers_fib_vs_astrocyte = FindMarkers(
+  object = vobj.merge.sub10,
+  assay = "Spatial",
+  ident.1 = cluster1,
+  ident.2 = cluster2,
+  test.use = "MAST",
+  only.pos = FALSE,
+  min.pct = 0.05,
+  logfc.threshold = 0.2)
+
+write.csv(markers_fib_vs_astrocyte, paste0(dir, "/Tables/markers_fib_vs_astrocyte.csv"))
+```
+
+
+
+
+*Volcano Plot*
+fibroblasts vs. astrocytes, 21dpi
+
+Set your parameters
+```{r}
+#Minimum fold change (i.e. 1.15 = 15% increase)
+minfc = 1.15
+#Max adj. p value
+alpha = 0.05
+#Genes to highlight
+ngenes = 50
+
+defile = "markers_fib_vs_astrocyte.csv"
+
+#Comparison being made (must match file names)
+comparison = "markers_fib_vs_astrocyte"
+
+newlist=list(de)
+de = read.csv(file.path(dir,"Tables", defile),stringsAsFactors = F) #any   spreadsheet with gene symbols or other identifiers
+colnames(de)[1] = "Gene"
+
+#NOTE: generated from "DEG_analysis" script
+fc = de
+fc = fc[!is.na(fc$avg_log2FC),]
+colorkeysdown = fc$Gene[fc$avg_log2FC < -log2(minfc) & fc$p_val_adj < alpha]
+colorkeysup = fc$Gene[fc$avg_log2FC > log2(minfc) & fc$p_val_adj < alpha]
+
+#Either highlight specific genes or pick the top genes in colorkeysup/down
+top = fc[fc$p_val_adj<alpha,]
+top = top[order(top$avg_log2FC),"Gene"]
+highlight_top = c(head(top,ngenes),tail(top,ngenes))
+highlight_immune = c("Ccl8", "Ccl2", "Ccl6", "Ccl4", "Ccl12", "Ccl3", "Ccl19", "Cxcl10", "Cxcl1", "Cxcl14", "Cxcl16", "Cxcl12", "Cxcl5", "Il7r", "Ifitm1", "Ifitm2", "Ifitm3", "Itgam", "H2-Aa", "Csf1")
+highlight_identity = c("Col1a2", "Dcn", "Lum", "Gfap", "Col1a1", "Aldh1l1", "Sox9", "Aqp4", "Pdgfra")
+genelists = list(highlight_immune, highlight_identity, highlight_top)
+names_genelists = c("immune", "identity", "top")
+size_labels = c(4, 4, 2)
+
+
+allcolors = rep("darkgrey",length(fc$Gene))
+names(allcolors) = fc$Gene
+allcolors[names(allcolors) %in% colorkeysdown] = "red"
+allcolors[names(allcolors) %in% colorkeysup]= "blue"
+names(allcolors)[allcolors == "yellow"] = "labelled"
+names(allcolors)[allcolors == "blue"] = "Enriched  in Fibroblasts"
+names(allcolors)[allcolors == "darkgrey"] = "-"
+names(allcolors)[allcolors == "red"] = "Enriched in Astrocytes"
+  
+#manual label
+name = "Fibroblasts vs. Astrocytes"
+range = max(max(fc$avg_log2FC), min(fc$avg_log2FC))
+if(is.infinite(range)){range = 150}
+
+for(i in 1:length(names_genelists)){
+  setEPS()
+  postscript(file.path(dir,"Plots/fibroblast-vs-astrocyte",paste0("Volcano_",comparison,"_", names_genelists[i], ".eps")))
+  print(EnhancedVolcano(fc,
+              lab = fc$Gene,
+              x = 'avg_log2FC',
+              y = 'p_val_adj',
+              xlim = c(-range, range),
+              title = name,
+              drawConnectors = T,
+              arrowheads = F,
+              legendPosition = 'bottom',
+              pCutoff = alpha,
+              FCcutoff = log2(minfc),
+              selectLab = genelists[[i]],
+              labSize = size_labels[i],
+              pointSize = 0.5,
+              col=c('black', 'black', 'black', 'red3'),
+              colCustom = allcolors,
+              gridlines.major = F,
+              gridlines.minor = F,
+              colAlpha = 1,
+              max.overlaps = 50))
+  dev.off()
+}
+
+```
+
+Make the heatmap
+```{r}
+ 
+Plotfolder = "Plots/fibroblast-vs-astrocyte" 
+
+#cluster2 = 13 = Astrocytes
+#cluster1 = 8 = Fibroblasts
+
+#Subset each cluster to ncells
+cellnames = vobj.merge.sub10@meta.data[,"sub.cluster"]
+names(cellnames) = colnames(vobj.merge.sub10)
+cellnames = cellnames[cellnames %in% c(cluster1, cluster2)]
+clusters = levels(as.factor(cellnames))
+newcellnames = NULL
+for (cluster in clusters){
+  n = length(cellnames[cellnames == cluster])
+  if (n > ncells){n = ncells}
+  newcluster = sample(cellnames[cellnames == cluster],n, replace = F)
+  newcellnames = c(newcellnames,newcluster)
+}
+
+#check
+table(newcellnames)
+
+#rename levels: add new metadata column (fib_timepoint) which is sub.cluster, but cluster1 and cluster2 named for their representative timepoints
+fib_or_ast = vobj.merge.sub10@meta.data$sub.cluster
+fib_or_ast[which(fib_or_ast == "13")] = "Astrocytes"
+fib_or_ast[which(fib_or_ast == "8")] = "Fibroblasts"
+vobj.merge.sub10 <- AddMetaData(vobj.merge.sub10, fib_or_ast, col.name = "fib.or.ast")
+Idents(vobj.merge.sub10) <- "fib.or.ast"                 
+
+#define features
+genelists = list(highlight_immune, highlight_identity, highlight_top)
+names_genelists = c("immune", "identity", "top")
+
+
+for(i in 1:length(names_genelists)){
+  highlight = genelists[[i]]
+  name = names_genelists[i]
+  
+  highlight = c(highlight[which(highlight %in% colorkeysdown)], highlight[which(highlight %in% colorkeysup)])
+
+  #Make heatmap
+  setEPS()
+  postscript(file.path(dir,Plotfolder, paste0(name, "_heatmap.eps")))
+  DoHeatmap(
+      object = vobj.merge.sub10, 
+      features = highlight,
+      cells = names(newcellnames),
+      size = 5,
+      label = T,
+      draw.lines = T,
+  )
+  dev.off()
+}
+
+```
+
+***Subset anatomical region - split rest and 2dpi***
+```{r}
+# Use SpatialDimPlots to visualize what to remove
+coords_rest = which(vobj.merge.sub10@images$A.Rest.2dpi@coordinates$imagerow < 7000)
+coords_2dpi = which(vobj.merge.sub10@images$A.Rest.2dpi@coordinates$imagerow > 7000)
+rest_2dpi_spot_names = rownames(vobj.merge.sub10@meta.data[which(vobj.merge.sub10$orig.ident == "Rest, 2dpi"),])
+rest_spot_names = rest_2dpi_spot_names[coords_rest]
+x2dpi_spot_names = rest_2dpi_spot_names[coords_2dpi]
+
+SpatialDimPlot(vobj.merge.sub10, images = "A.Rest.2dpi", cells.highlight = rest_spot_names)
+SpatialDimPlot(vobj.merge.sub10, images = "A.Rest.2dpi", cells.highlight = x2dpi_spot_names)
+
+#new timepoint variable, named by cell
+timepoint = vobj.merge.sub10@meta.data$orig.ident
+names(timepoint) = rownames(vobj.merge.sub10@meta.data)
+#21dpi deleter --> 21dpi
+timepoint[which(timepoint == "21dpi Deleter")] = "21dpi"
+#rest and 2dpi subset
+timepoint[rest_spot_names] = "Rest"
+timepoint[x2dpi_spot_names] = "2dpi"
+
+
+vobj.merge.sub10 <- AddMetaData(vobj.merge.sub10, timepoint, col.name = "timepoint")
+Idents(vobj.merge.sub10) <- "timepoint"    
+
+SpatialDimPlot(vobj.merge.sub10)
+
+#PLOT NEW GRAPHS DIVIDED BY TIMEPOINT
+Plotfolder = "Plots/timepoint_parsed"
+name = paste0(project,iterationname, "_timepoint_parsed_")
+
+#dim plots for clustering
+PrintSeuratGraph(seurat_object = vobj.merge.sub10, namecard = paste0(name, "_grouped") ,graphtype = "dim", group = "timepoint")
+PrintSeuratGraph(seurat_object = vobj.merge.sub10, namecard = name,graphtype = "spatialdim")
+
+Idents(vobj.merge.sub10) = "seurat_clusters"
+p1 = DimPlot(vobj.merge.sub10, split.by = "timepoint")
+p1$data$timepoint <- factor(x = p1$data$timepoint, levels = c("Rest", "2dpi", "7dpi", "21dpi"))
+name = "_dimvisiumv1_split_wide.eps"
+
+setEPS()
+postscript(file.path(dir,Plotfolder,name), width = 10, height = 5)
+print(p1)
+dev.off()
+
+name = "_dimvisiumv1_split_combined.eps"
+
+p1 <- p1 + theme(legend.position = "none")
+p2 <- DimPlot(vobj.merge.sub10)
+p3 <- SpatialDimPlot(vobj.merge.sub10, images = image1) + theme(legend.position = "none")
+p4 <- SpatialDimPlot(vobj.merge.sub10, images = image2) + theme(legend.position = "none")
+p5 <- SpatialDimPlot(vobj.merge.sub10, images = image3) + theme(legend.position = "none")
+p6 = p3 + p4 + p5
+
+setEPS()
+postscript(file.path(dir,Plotfolder,name), height = 10)
+ggarrange(ggarrange(
+ p2, p1, nrow = 2), p6, nrow = 2)
+dev.off()
+
+
+
+```
+
+***COMPARE FIBROBLASTS 21dpi vs. Rest***
+
+```{r}
+vobj.merge.sub10 <- SetIdent(vobj.merge.sub10, value = vobj.merge.sub10@meta.data$sub.cluster)
+cluster1 = "8"
+cluster2 = "3"
+#cluster2 = 3 = rest
+#cluster1 = 8 = 21dpi
+
+#Find markers based on scaled Spatial assay
+markers_fib_21dpi_vs_rest = FindMarkers(
+  object = vobj.merge.sub10,
+  assay = "Spatial",
+  ident.1 = cluster1,
+  ident.2 = cluster2,
+  test.use = "MAST",
+  only.pos = FALSE,
+  min.pct = 0.05,
+  logfc.threshold = 0.2)
+
+write.csv(markers_fib_21dpi_vs_rest, paste0(dir, "/Tables/markers_fib_21dpi_vs_rest.csv"))
+```
+
+
+
+
+*Volcano Plot*
+Set your parameters
+```{r}
+#Minimum fold change (i.e. 1.15 = 15% increase)
+minfc = 1.15
+#Max adj. p value
+alpha = 0.05
+#Genes to highlight
+ngenes = 50
+
+defile = "markers_fib_21dpi_vs_rest.csv"
+
+#Comparison being made (must match file names)
+comparison = "markers_fib_21dpi_vs_rest"
+
+newlist=list(de)
+de = read.csv(file.path(dir,"Tables", defile),stringsAsFactors = F) #any   spreadsheet with gene symbols or other identifiers
+colnames(de)[1] = "Gene"
+
+#NOTE: generated from "DEG_analysis" script
+fc = de
+fc = fc[!is.na(fc$avg_log2FC),]
+colorkeysdown = fc$Gene[fc$avg_log2FC < -log2(minfc) & fc$p_val_adj < alpha]
+colorkeysup = fc$Gene[fc$avg_log2FC > log2(minfc) & fc$p_val_adj < alpha]
+
+#Either highlight specific genes or pick the top genes in colorkeysup/down
+top = fc[fc$p_val_adj<alpha,]
+top = top[order(top$avg_log2FC),"Gene"]
+highlight_top = c(head(top,ngenes),tail(top,ngenes))
+highlight_immune = c("Ccl8", "Ccl6", "Ccl5", "Ccl9", "Ccl4", "Ccl3", "Ccl27a", "Ccl19", "Cxcl14", "Cxcl9", "Cxcl10", "Cxcl12", "Cxcl16", "Il13ra1", "Il17ra", "Il18", "Il7r", "Il33", "Il4ra", "Il18bp", "Csf1", "H2-Aa", "Ifitm1", "Ifitm2", "Ifitm3", "Itgam", "Ptprc", "Cd44", "Cd86", "Ifnar2", "Ifngr2", "Ifnar1", "Ifngr1")
+highlight_fib = c("Col1a2", "Col1a1", "Dcn", "Lum", "Gfap", "Col6a1", "Aqp4")
+genelists = list(highlight_immune, highlight_identity, highlight_top)
+names_genelists = c("immune", "identity", "top")
+size_labels = c(4, 4, 2)
+
+
+allcolors = rep("darkgrey",length(fc$Gene))
+names(allcolors) = fc$Gene
+allcolors[names(allcolors) %in% colorkeysdown] = "red"
+allcolors[names(allcolors) %in% colorkeysup]= "blue"
+names(allcolors)[allcolors == "yellow"] = "labelled"
+names(allcolors)[allcolors == "blue"] = "Enriched 21dpi"
+names(allcolors)[allcolors == "darkgrey"] = "-"
+names(allcolors)[allcolors == "red"] = "Enriched at Rest"
+  
+#manual label
+name = "Fibroblasts Rest vs. 21dpi"
+range = max(max(fc$avg_log2FC), min(fc$avg_log2FC))
+if(is.infinite(range)){range = 150}
+
+for(i in 1:length(names_genelists)){
+  setEPS()
+  postscript(file.path(dir,"Plots/fibroblast-21dpi-vs-rest",paste0("Volcano_",comparison,"_", names_genelists[i], ".eps")))
+  print(EnhancedVolcano(fc,
+              lab = fc$Gene,
+              x = 'avg_log2FC',
+              y = 'p_val_adj',
+              xlim = c(-range, range),
+              title = name,
+              drawConnectors = T,
+              arrowheads = F,
+              legendPosition = 'bottom',
+              pCutoff = alpha,
+              FCcutoff = log2(minfc),
+              selectLab = genelists[[i]],
+              labSize = size_labels[i],
+              pointSize = 0.5,
+              col=c('black', 'black', 'black', 'red3'),
+              colCustom = allcolors,
+              gridlines.major = F,
+              gridlines.minor = F,
+              colAlpha = 1,
+              max.overlaps = 50))
+  dev.off()
+}
+
+```
+
+Make the heatmap
+```{r}
+ 
+Plotfolder = "Plots/fibroblast-21dpi-vs-rest" 
+
+#cluster2 = 3 = Rest
+#cluster1 = 8 = 21dpi
+
+#Subset each cluster to ncells
+cellnames = vobj.merge.sub10@meta.data[,"sub.cluster"]
+names(cellnames) = colnames(vobj.merge.sub10)
+cellnames = cellnames[cellnames %in% c(cluster1, cluster2)]
+clusters = levels(as.factor(cellnames))
+newcellnames = NULL
+for (cluster in clusters){
+  n = length(cellnames[cellnames == cluster])
+  if (n > ncells){n = ncells}
+  newcluster = sample(cellnames[cellnames == cluster],n, replace = F)
+  newcellnames = c(newcellnames,newcluster)
+}
+
+#check
+table(newcellnames)
+
+#define features
+genelists = list(highlight_immune, highlight_fib, highlight_top)
+names_genelists = c("immune", "fib", "top")
+
+
+for(i in 1:length(names_genelists)){
+  highlight = genelists[[i]]
+  name = names_genelists[i]
+  
+  highlight = c(highlight[which(highlight %in% colorkeysdown)], highlight[which(highlight %in% colorkeysup)])
+
+  #Make heatmap
+  setEPS()
+  postscript(file.path(dir,Plotfolder, paste0(name, "_heatmap.eps")))
+  DoHeatmap(
+      object = vobj.merge.sub10, 
+      features = highlight,
+      cells = names(newcellnames),
+      size = 5,
+      label = T,
+      draw.lines = T,
+  )
+  dev.off()
+}
+
+```
+
+***GENE SET TESTING**
+https://bioinformatics-core-shared-training.github.io/RNAseq-R/rna-seq-gene-set-testing.nb.html
+
+*Competitive gene set testing with GO-seq: "are DEGs over-represented in particular gene sets relative to all (not just DE) genes"?*
+https://bioconductor.org/packages/devel/bioc/vignettes/goseq/inst/doc/goseq.pdf
+
+*Here, but use markers for each cluster VS EACH OTHER (as opposed to below, using markers VS ALL OTHER CLUSTERS)*
+
+```{r}
+# create list of all genes
+all_genes = rownames(vobj.merge.sub10)
+
+# create list of DE genes
+defile = "markers_7-vs-21-fib.csv"
+de_upanddown = read.csv(file.path(paste0(dir,"/Tables/", defile)),stringsAsFactors = F) #any   spreadsheet with gene symbols or other identifiers
+colnames(de_upanddown)[1] = "Gene"
+
+de21 = de_upanddown[de_upanddown$avg_log2FC>0,]
+de7 = de_upanddown[de_upanddown$avg_log2FC<0,]
+
+
+Plotfolder = "Plots/GO"
+
+#7dpi
+de = de7
+name = "7dpi"
+sig_de_genes = de[(de$p_val_adj < 0.05),][,1]
+
+de_genes = all_genes %in% sig_de_genes
+names(de_genes) = all_genes
+
+# Fit PWF
+pwf.7 <- nullp(de_genes, "mm10","geneSymbol")
+
+go.results.7 <- goseq(pwf.7, "mm10","geneSymbol")
+enriched.go.7=go.results.7$category[p.adjust(go.results.7$over_represented_pvalue, method="BH")<.05]
+
+# SEE OUTPUT:
+# library(GO.db)
+# for(go in enriched.go.7[1:10]){
+#     print(GOTERM[[go]])
+#     cat("--------------------------------------\n")
+# }
+
+setEPS()
+postscript(file.path(dir,Plotfolder, paste0(name, "_GO_barplot.eps")))
+par(mar=c(5,18,1,1))
+barplot(
+  go.results.7$numDEInCat[1:20],
+  names.arg = go.results.7$term[1:20],
+  horiz = TRUE,
+  xlab = "# DE Genes in Category",
+  las = 2
+)
+dev.off()
+  
+#enrichGO
+#https://sbc.shef.ac.uk/prostate-bioinformatics/rna-seq-gene-set-testing.nb.html
+  
+# from above: 
+# all_genes (background)
+# sig_de_genes = de[de$p_val_adj < 0.05,][,1] (de)
+  
+enrich_go.7 <- enrichGO(
+  gene= sig_de_genes,
+  OrgDb = org.Mm.eg.db,
+  keyType = "SYMBOL",
+  ont = c("ALL"),
+  universe = all_genes,
+  qvalueCutoff = 0.05,
+   readable=TRUE
+)
+  
+setEPS()
+postscript(file.path(dir,Plotfolder, paste0(name, "_GO_enrich_dotplot.eps")))
+dotplot(enrich_go.7, showCategory = 20, font.size = 8)
+dev.off()
+  
+setEPS()
+postscript(file.path(dir,Plotfolder, paste0(name, "_GO_enrich_barplot.eps")))
+barplot(enrich_go.7, showCategory = 20, font.size = 8)
+dev.off()
+  
+setEPS()
+postscript(file.path(dir,Plotfolder, paste0(name, "_GO_enrich_barplot_split.eps")))
+dotplot(enrich_go.7, split="ONTOLOGY", font.size = 8) + facet_grid(ONTOLOGY~., scale="free")
+dev.off()
+  
+enrich_go.7.simple <- simplify(enrich_go.7)
+
+cats = c( "leukocyte chemotaxis", "glial cell migration", "cell killing", "tumor necrosis factor superfamily cytokine production")
+    
+fold_change = de[which(sig_de_genes == enrich_go.7.simple@gene),]$avg_log2FC
+names(fold_change) = de[which(sig_de_genes == enrich_go.7.simple@gene),]$Gene
+ 
+pdf(file.path(dir,Plotfolder, paste0(name, "cnet.pdf")))
+cnetplot(enrich_go.7.simple, colorEdge = TRUE, foldChange=fold_change, cex_label_category = 0.6, cex_label_gene = 0.4, showCategory = cats)
+dev.off()
+  
+pdf(file.path(dir,Plotfolder, paste0(name, "cnet_circular.pdf")))
+cnetplot(enrich_go.7.simple, circular = TRUE, colorEdge = TRUE, foldChange=fold_change, cex_label_category = 0.6, cex_label_gene = 0.4, showCategory = cats)
+dev.off()
+
+#21dpi
+de = de21
+name = "21dpi"
+sig_de_genes = de[(de$p_val_adj < 0.05),][,1]
+
+de_genes = all_genes %in% sig_de_genes
+names(de_genes) = all_genes
+
+# Fit PWF
+pwf.21 <- nullp(de_genes, "mm10","geneSymbol")
+
+go.results.21 <- goseq(pwf.21, "mm10","geneSymbol")
+enriched.go.21=go.results.21$category[p.adjust(go.results.21$over_represented_pvalue, method="BH")<.05]
+
+# SEE OUTPUT:
+# library(GO.db)
+# for(go in enriched.go.21[1:10]){
+#     print(GOTERM[[go]])
+#     cat("--------------------------------------\n")
+# }
+ 
+setEPS()
+postscript(file.path(dir,Plotfolder, paste0(name, "_GO_barplot.eps")))
+par(mar=c(5,18,1,1))
+barplot(
+  go.results.21$numDEInCat[1:20],
+  names.arg = go.results.21$term[1:20],
+  horiz = TRUE,
+  xlab = "# DE Genes in Category",
+  las = 2
+)
+dev.off()
+  
+#enrichGO
+#https://sbc.shef.ac.uk/prostate-bioinformatics/rna-seq-gene-set-testing.nb.html
+  
+# from above: 
+# all_genes (background)
+# sig_de_genes = de[de$p_val_adj < 0.05,][,1] (de)
+  
+enrich_go.21 <- enrichGO(
+  gene= sig_de_genes,
+  OrgDb = org.Mm.eg.db,
+  keyType = "SYMBOL",
+  ont = c("ALL"),
+  universe = all_genes,
+  qvalueCutoff = 0.05,
+   readable=TRUE
+)
+  
+setEPS()
+postscript(file.path(dir,Plotfolder, paste0(name, "_GO_enrich_dotplot.eps")))
+dotplot(enrich_go.21, showCategory = 20, font.size = 8)
+dev.off()
+  
+setEPS()
+postscript(file.path(dir,Plotfolder, paste0(name, "_GO_enrich_barplot.eps")))
+barplot(enrich_go.21, showCategory = 20, font.size = 8)
+dev.off()
+  
+setEPS()
+postscript(file.path(dir,Plotfolder, paste0(name, "_GO_enrich_barplot_split.eps")))
+dotplot(enrich_go.21, split="ONTOLOGY", font.size = 8) + facet_grid(ONTOLOGY~., scale="free")
+dev.off()
+  
+enrich_go.21.simple <- simplify(enrich_go.21)
+
+cats = c( "extracellular matrix organization","ossification", "wound healing", "regulation of vasculature development", "tissue remodeling")
+
+    
+fold_change = de[which(sig_de_genes == enrich_go.21.simple@gene),]$avg_log2FC
+names(fold_change) = de[which(sig_de_genes == enrich_go.21.simple@gene),]$Gene
+ 
+pdf(file.path(dir,Plotfolder, paste0(name, "cnet.pdf")))
+cnetplot(enrich_go.21.simple, colorEdge = TRUE, foldChange=fold_change, cex_label_category = 0.6, cex_label_gene = 0.4, showCategory = cats)
+dev.off()
+  
+pdf(file.path(dir,Plotfolder, paste0(name, "cnet_circular.pdf")))
+cnetplot(enrich_go.21.simple, circular = TRUE, colorEdge = TRUE, foldChange=fold_change, cex_label_category = 0.6, cex_label_gene = 0.4, showCategory = cats)
+dev.off()
+
+#both together - just last cnet graph
+name = "total"
+de = de_upanddown
+sig_de_genes = de[(de$p_val_adj < 0.05),][,1]
+enrich_go <- enrichGO(
+    gene= sig_de_genes,
+    OrgDb = org.Mm.eg.db,
+    keyType = "SYMBOL",
+    ont = c("ALL"),
+    universe = all_genes,
+    qvalueCutoff = 0.05,
+    readable=TRUE
+  )
+
+setEPS()
+postscript(file.path(dir,Plotfolder, paste0(name, "_GO_enrich_barplot.eps")))
+barplot(enrich_go, showCategory = 20, font.size = 8)
+dev.off()
+
+enrich_go_simple <- simplify(enrich_go)
+
+fold_change = de[which(sig_de_genes == enrich_go_simple@gene),]$avg_log2FC
+names(fold_change) = de[which(sig_de_genes == enrich_go_simple@gene),]$Gene
+
+cats = c( "extracellular matrix organization","leukocyte chemotaxis", "myeloid leukocyte migration", "regulation of immune effector process", "ossification", "collagen metabolic process", "wound healing")
+
+pdf(file.path(dir,Plotfolder, paste0(name, "cnet.pdf")))
+cnetplot(enrich_go_simple, colorEdge = TRUE, foldChange=fold_change, cex_label_category = 0.6, cex_label_gene = 0.4, cex_category = 0.5, cex_gene = 0.5, node_label = "category", showCategory = cats)
+dev.off()
+  
+pdf(file.path(dir,Plotfolder, paste0(name, "cnet_circular.pdf")))
+cnetplot(enrich_go_simple, circular = TRUE, colorEdge = TRUE, foldChange=fold_change, cex_label_category = 0.6, cex_label_gene = 0.4, showCategory = cats)
+dev.off()
+
+```
+
+*repeat but use markers for each cluster VS ALL OTHER CLUSTERS (as opposed to above, using markers for each cluster VS EACH OTHER)*
+
+```{r}
+# create list of all genes
+all_genes = rownames(vobj.merge.sub10)
+
+# create list of DE genes
+Idents(vobj.merge.sub10) = "sub.cluster"
+cluster2 = "10_0" #7dpi
+cluster1 = "8" #21dpi
+
+#here, instead of loading 7 vs 21dpi de file (as above), getting markers for each cluster vs. all others
+markers_7dpifib = FindMarkers(
+  object = vobj.merge.sub10,
+  assay = "Spatial",
+  ident.1 = cluster2,
+  test.use = "MAST",
+  only.pos = FALSE,
+  min.pct = 0.05,
+  logfc.threshold = 0.2)
+markers_21dpifib = FindMarkers(
+  object = vobj.merge.sub10,
+  assay = "Spatial",
+  ident.1 = cluster1,
+  test.use = "MAST",
+  only.pos = FALSE,
+  min.pct = 0.05,
+  logfc.threshold = 0.2)
+
+de21 = markers_21dpifib[markers_21dpifib$avg_log2FC>0,]
+de7 = markers_7dpifib[markers_7dpifib$avg_log2FC>0,]
+
+Plotfolder = "Plots/GO/vs_all"
+
+#7dpi
+de = de7
+name = "7dpi"
+sig_de_genes = rownames(de[(de$p_val_adj < 0.05),])
+
+de_genes = all_genes %in% sig_de_genes
+names(de_genes) = all_genes
+
+# Fit PWF
+pwf.7 <- nullp(de_genes, "mm10","geneSymbol")
+
+go.results.7 <- goseq(pwf.7, "mm10","geneSymbol")
+enriched.go.7=go.results.7$category[p.adjust(go.results.7$over_represented_pvalue, method="BH")<.05]
+
+# SEE OUTPUT:
+# library(GO.db)
+# for(go in enriched.go.7[1:10]){
+#     print(GOTERM[[go]])
+#     cat("--------------------------------------\n")
+# }
+ 
+setEPS()
+postscript(file.path(dir,Plotfolder, paste0(name, "_GO_barplot.eps")))
+par(mar=c(5,18,1,1))
+barplot(
+  go.results.7$numDEInCat[1:20],
+  names.arg = go.results.7$term[1:20],
+  horiz = TRUE,
+  xlab = "# DE Genes in Category",
+  las = 2
+)
+dev.off()
+  
+#enrichGO
+#https://sbc.shef.ac.uk/prostate-bioinformatics/rna-seq-gene-set-testing.nb.html
+  
+# from above: 
+# all_genes (background)
+# sig_de_genes = de[de$p_val_adj < 0.05,][,1] (de)
+  
+enrich_go.7 <- enrichGO(
+  gene= sig_de_genes,
+  OrgDb = org.Mm.eg.db,
+  keyType = "SYMBOL",
+  ont = c("ALL"),
+  universe = all_genes,
+  qvalueCutoff = 0.05,
+   readable=TRUE
+)
+  
+setEPS()
+postscript(file.path(dir,Plotfolder, paste0(name, "_GO_enrich_dotplot.eps")))
+dotplot(enrich_go.7, showCategory = 20, font.size = 8)
+dev.off()
+  
+setEPS()
+postscript(file.path(dir,Plotfolder, paste0(name, "_GO_enrich_barplot.eps")))
+barplot(enrich_go.7, showCategory = 20, font.size = 8)
+dev.off()
+  
+setEPS()
+postscript(file.path(dir,Plotfolder, paste0(name, "_GO_enrich_barplot_split.eps")))
+dotplot(enrich_go.7, split="ONTOLOGY", font.size = 8) + facet_grid(ONTOLOGY~., scale="free")
+dev.off()
+  
+enrich_go.7.simple <- simplify(enrich_go.7)
+
+cats = c( "leukocyte migration", "wound healing", "cytokine-mediated signaling pathway", "extracellular matrix organization", "myeloid leukocyte activation", "response to interferon-gamma")
+    
+fold_change = de[which(sig_de_genes == enrich_go.7.simple@gene),]$avg_log2FC
+names(fold_change) = rownames(de[which(sig_de_genes == enrich_go.7.simple@gene),])
+ 
+pdf(file.path(dir,Plotfolder, paste0(name, "cnet.pdf")))
+cnetplot(enrich_go.7.simple, colorEdge = TRUE, foldChange=fold_change, cex_label_category = 0.6, cex_label_gene = 0.4, showCategory = cats)
+dev.off()
+  
+pdf(file.path(dir,Plotfolder, paste0(name, "cnet_circular.pdf")))
+cnetplot(enrich_go.7.simple, circular = TRUE, colorEdge = TRUE, foldChange=fold_change, cex_label_category = 0.6, cex_label_gene = 0.4)
+dev.off()
+
+#21dpi
+
+de = de21
+name = "21dpi"
+sig_de_genes = rownames(de[(de$p_val_adj < 0.05),])
+
+de_genes = all_genes %in% sig_de_genes
+names(de_genes) = all_genes
+
+# Fit PWF
+pwf.21 <- nullp(de_genes, "mm10","geneSymbol")
+
+go.results.21 <- goseq(pwf.21, "mm10","geneSymbol")
+enriched.go.21=go.results.21$category[p.adjust(go.results.21$over_represented_pvalue, method="BH")<.05]
+
+# SEE OUTPUT:
+# library(GO.db)
+# for(go in enriched.go.21[1:10]){
+#     print(GOTERM[[go]])
+#     cat("--------------------------------------\n")
+# }
+ 
+setEPS()
+postscript(file.path(dir,Plotfolder, paste0(name, "_GO_barplot.eps")))
+par(mar=c(5,18,1,1))
+barplot(
+  go.results.21$numDEInCat[1:20],
+  names.arg = go.results.21$term[1:20],
+  horiz = TRUE,
+  xlab = "# DE Genes in Category",
+  las = 2
+)
+dev.off()
+  
+#enrichGO
+#https://sbc.shef.ac.uk/prostate-bioinformatics/rna-seq-gene-set-testing.nb.html
+  
+# from above: 
+# all_genes (background)
+# sig_de_genes = de[de$p_val_adj < 0.05,][,1] (de)
+  
+enrich_go.21 <- enrichGO(
+  gene= sig_de_genes,
+  OrgDb = org.Mm.eg.db,
+  keyType = "SYMBOL",
+  ont = c("ALL"),
+  universe = all_genes,
+  qvalueCutoff = 0.05,
+   readable=TRUE
+)
+  
+setEPS()
+postscript(file.path(dir,Plotfolder, paste0(name, "_GO_enrich_dotplot.eps")))
+dotplot(enrich_go.21, showCategory = 20, font.size = 8)
+dev.off()
+  
+setEPS()
+postscript(file.path(dir,Plotfolder, paste0(name, "_GO_enrich_barplot.eps")))
+barplot(enrich_go.21, showCategory = 20, font.size = 8)
+dev.off()
+  
+setEPS()
+postscript(file.path(dir,Plotfolder, paste0(name, "_GO_enrich_barplot_split.eps")))
+dotplot(enrich_go.21, split="ONTOLOGY", font.size = 8) + facet_grid(ONTOLOGY~., scale="free")
+dev.off()
+  
+enrich_go.21.simple <- simplify(enrich_go.21)
+
+cats = c( "leukocyte migration", "wound healing", "cytokine-mediated signaling pathway", "extracellular matrix organization", "regulation of angiogenesis")
+
+    
+fold_change = de[which(sig_de_genes == enrich_go.21.simple@gene),]$avg_log2FC
+names(fold_change) = rownames(de[which(sig_de_genes == enrich_go.21.simple@gene),])
+ 
+pdf(file.path(dir,Plotfolder, paste0(name, "cnet.pdf")))
+cnetplot(enrich_go.21.simple, colorEdge = TRUE, foldChange=fold_change, cex_label_category = 0.6, cex_label_gene = 0.4, showCategory = cats)
+dev.off()
+  
+pdf(file.path(dir,Plotfolder, paste0(name, "cnet_circular.pdf")))
+cnetplot(enrich_go.21.simple, circular = TRUE, colorEdge = TRUE, foldChange=fold_change, cex_label_category = 0.6, cex_label_gene = 0.4, showCategory = cats)
+dev.off()
+```
+
+
+*Self-contained gene set testing with GSEA: "are genes in a given gene set differentially expressed as a whole?"
+https://crazyhottommy.github.io/scRNA-seq-workshop-Fall-2019/scRNAseq_workshop_3.html#gene_set_enrichment_(gsea)_analysis
+```{r}
+Plotfolder = "Plots/gsea"
+
+wilco.genes <- wilcoxauc(vobj.merge.sub10, 'sub.cluster', seurat_assay = "Spatial")
+dplyr::count(wilco.genes, group)
+
+cats = c("immune", "hallmark", "curated", "reactome")
+
+m_df_1<- msigdbr(species = "Mus musculus", category = "C7")
+m_df_2<- msigdbr(species = "Mus musculus", category = "H")
+m_df_3<- msigdbr(species = "Mus musculus", category = "C2")
+m_df_4<- msigdbr(species = "Mus musculus", category = "C2", subcategory = "REACTOME")
+
+
+fgsea_sets_1 <- m_df_1 %>% split(x = .$gene_symbol, f = .$gs_name)
+fgsea_sets_2 <- m_df_2 %>% split(x = .$gene_symbol, f = .$gs_name)
+fgsea_sets_3 <- m_df_3 %>% split(x = .$gene_symbol, f = .$gs_name)
+fgsea_sets_4 <- m_df_4 %>% split(x = .$gene_symbol, f = .$gs_name)
+
+genes.7dpi <- wilco.genes
+genes.21dpi <- wilco.genes
+genes.all = list(genes.7dpi, genes.21dpi)
+ranks.all = list()
+clusters = c("10_0", "8")
+for(i in c(1:2)){
+  wilco.genes %>%
+    dplyr::filter(group == clusters[i]) %>%
+    arrange(desc(logFC), desc(auc)) %>%
+    head(n = 10)
+  
+  genes.all[[i]] <- wilco.genes %>%
+    dplyr::filter(group == clusters[i]) %>%
+    arrange(desc(logFC), desc(auc)) %>% 
+    dplyr::select(feature, logFC)
+
+    ranks.all[[i]]<- deframe(genes.all[[i]])
+
+    head(ranks.all[[i]])
+}
+
+fgseaRes.7dpi_1 <- fgsea(fgsea_sets_1, 
+                  stats = ranks.all[[1]],
+                  minSize=15,
+                  # maxSize=500,
+                  # nperm=100000,
+                  )
+fgseaRes.7dpi_2 <- fgsea(fgsea_sets_2, 
+                  stats = ranks.all[[1]],
+                  minSize=15,
+                  # maxSize=500,
+                  # nperm=100000,
+                  )
+fgseaRes.7dpi_3 <- fgsea(fgsea_sets_3, 
+                  stats = ranks.all[[1]],
+                  minSize=15,
+                  # maxSize=500,
+                  # nperm=100000,
+                  )
+fgseaRes.7dpi_4 <- fgsea(fgsea_sets_4, 
+                  stats = ranks.all[[1]],
+                  minSize=15,
+                  # maxSize=500,
+                  # nperm=100000,
+                  )
+fgseaRes.21dpi_1 <- fgsea(fgsea_sets_1, 
+                  stats = ranks.all[[2]],
+                  minSize=15,
+                  # maxSize=500,
+                  # nperm=100000,
+                  )
+fgseaRes.21dpi_2 <- fgsea(fgsea_sets_2, 
+                  stats = ranks.all[[2]],
+                  minSize=15,
+                  # maxSize=500,
+                  # nperm=100000,
+                  )
+fgseaRes.21dpi_3 <- fgsea(fgsea_sets_3, 
+                  stats = ranks.all[[2]],
+                  minSize=15,
+                  # maxSize=500,
+                  # nperm=100000,
+                  )
+fgseaRes.21dpi_4 <- fgsea(fgsea_sets_4, 
+                  stats = ranks.all[[2]],
+                  minSize=15,
+                  # maxSize=500,
+                  # nperm=100000,
+                  )
+
+fgseaRes.all <- list(fgseaRes.7dpi_1, fgseaRes.7dpi_2, fgseaRes.7dpi_3, fgseaRes.7dpi_4, fgseaRes.21dpi_1, fgseaRes.21dpi_2, fgseaRes.21dpi_3, fgseaRes.21dpi_4)
+fgseaRes.all.tidy <- list()
+
+graphs = list()
+graphnames = list()
+k = 1
+times = c("7dpi", "21dpi")
+
+for(i in c(1:length(clusters))){
+  for(j in c(0:(length(cats) - 1))){
+    fgseaRes.all.tidy[[k]] <- fgseaRes.all[[k]] %>%
+    as_tibble() %>%
+    arrange(desc(NES))
+
+    #fgseaRes.all.tidy[[k]] %>% 
+    #  dplyr::select(-leadingEdge, -ES, NES) %>% 
+    #  arrange(padj) %>% 
+    #  head()
+    
+    # only plot the top 20 pathways
+    name = paste0("gsea_", times[i], "_", cats[j+1], ".eps")
+    p1 <- ggplot(fgseaRes.all.tidy[[k]] %>% filter(padj < 0.008) %>% head(n=20), aes(reorder(pathway, NES), NES)) +
+      #geom_col(aes(fill= NES < 1.9)) +
+      geom_col(aes(fill= size)) +
+      coord_flip() +
+      labs(x="Pathway", y="Normalized Enrichment Score",
+        title=paste0(clusters[i], " ", cats[j+1])) + 
+      theme_minimal()
+    
+      graphs[[k]] <- p1
+      graphnames[[k]] <- name
+      k = k + 1
+  }
+}
+
+setEPS()
+postscript(file.path(dir, Plotfolder, graphnames[[1]]), width = 12)
+graphs[[1]]
+dev.off()
+
+setEPS()
+postscript(file.path(dir, Plotfolder, graphnames[[2]]), width = 12)
+graphs[[2]]
+dev.off()
+
+setEPS()
+postscript(file.path(dir, Plotfolder, graphnames[[3]]), width = 12)
+graphs[[3]]
+dev.off()
+
+setEPS()
+postscript(file.path(dir, Plotfolder, graphnames[[4]]), width = 12)
+graphs[[4]]
+dev.off()
+
+setEPS()
+postscript(file.path(dir, Plotfolder, graphnames[[5]]), width = 12)
+graphs[[5]]
+dev.off()
+
+setEPS()
+postscript(file.path(dir, Plotfolder, graphnames[[6]]), width = 12)
+graphs[[6]]
+dev.off()
+
+setEPS()
+postscript(file.path(dir, Plotfolder, graphnames[[7]]), width = 12)
+graphs[[7]]
+dev.off()
+
+setEPS()
+postscript(file.path(dir, Plotfolder, graphnames[[8]]), width = 12)
+graphs[[8]]
+dev.off()
+
+
+#graph individual paths (barcode plot)
+pathways = c("REACTOME_IMMUNOREGULATORY_INTERACTIONS_BETWEEN_A_LYMPHOID_AND_A_NON_LYMPHOID_CELL", "REACTOME_EXTRACELLULAR_MATRIX_ORGANIZATION", "HALLMARK_ANGIOGENESIS", "HALLMARK_INTERFERON_GAMMA_RESPONSE", "HALLMARK_INFLAMMATORY_RESPONSE")
+
+#have to change fgea_sets_x depending on which pathway terms are a part of
+
+p1 <- plotEnrichment(fgsea_sets_3[[pathways[1]]], ranks.all[[1]]) + labs(title=paste0("7dpi: ", pathways[1]))
+p2 <- plotEnrichment(fgsea_sets_3[[pathways[1]]], ranks.all[[2]]) + labs(title=paste0("21dpi: ", pathways[1]))                                                                 
+setEPS()
+postscript(file.path(dir, Plotfolder, paste0(pathways[1], ".eps")), width = 15)
+p1 + p2
+dev.off()
+
+p1 <- plotEnrichment(fgsea_sets_3[[pathways[2]]], ranks.all[[1]]) + labs(title=paste0("7dpi: ", pathways[2])) 
+p2 <- plotEnrichment(fgsea_sets_3[[pathways[2]]], ranks.all[[2]]) + labs(title=paste0("21dpi: ", pathways[2]))                                                                 
+setEPS()
+postscript(file.path(dir, Plotfolder, paste0(pathways[2], ".eps")), width = 15)
+p1 + p2
+dev.off()
+
+p1 <- plotEnrichment(fgsea_sets_2[[pathways[3]]], ranks.all[[1]]) + labs(title=paste0("7dpi: ", pathways[3])) 
+p2 <- plotEnrichment(fgsea_sets_2[[pathways[3]]], ranks.all[[2]]) + labs(title=paste0("21dpi: ", pathways[3]))                                                                 
+setEPS()
+postscript(file.path(dir, Plotfolder, paste0(pathways[3], ".eps")), width = 15)
+p1 + p2
+dev.off()
+
+p1 <- plotEnrichment(fgsea_sets_2[[pathways[4]]], ranks.all[[1]]) + labs(title=paste0("7dpi: ", pathways[4])) 
+p2 <- plotEnrichment(fgsea_sets_2[[pathways[4]]], ranks.all[[2]]) + labs(title=paste0("21dpi: ", pathways[4]))                                                                 
+setEPS()
+postscript(file.path(dir, Plotfolder, paste0(pathways[4], ".eps")), width = 15)
+p1 + p2
+dev.off()
+
+p1 <- plotEnrichment(fgsea_sets_2[[pathways[5]]], ranks.all[[1]]) + labs(title=paste0("7dpi: ", pathways[5])) 
+p2 <- plotEnrichment(fgsea_sets_2[[pathways[5]]], ranks.all[[2]]) + labs(title=paste0("21dpi: ", pathways[5]))                                                                 
+setEPS()
+postscript(file.path(dir, Plotfolder, paste0(pathways[5], ".eps")), width = 15)
+p1 + p2
+dev.off()
+```
+
+***ADD MODULE SCORE***
+```{r}
+
+Plotfolder = "Plots/module_score"
+# proliferation signature from https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2819333/#!po=73.5294
+#additions from https://www.nature.com/articles/nrc1802#:~:text=The%20proliferation%20signature%20is%20now,and%20cyclin%20B1%2C%20respectively).
+features_prolif = list(c("Ccnb1", "Ccne1", "Ccnd1", "E2f1", "Tfdp1", "Cdkn2b", "Cdkn1a", "Plk4", "Wee1", "Aurkb", "Bub1", "Chek1", "Prim1", "Top2a", "Cks1", "Rad51l1", "Shc", "Racgap1", "Cbx1", "Mki67", "Mybl2", "Bub1", "Plk1"))
+
+#below are from MD stromal in vitro experiments - took all genes where log2FC > 0, q < 0.05
+features_tgfb = read.csv(file.path(dir,"Data/Other/tgfb-vs-pbs.csv"),stringsAsFactors = F, header=F) 
+features_tnfa = read.csv(file.path(dir,"Data/Other/tnfa-vs-pbs.csv"),stringsAsFactors = F, header=F) 
+features_ifng = read.csv(file.path(dir,"Data/Other/ifng-vs-pbs.csv"),stringsAsFactors = F, header=F) 
+features_il1b = read.csv(file.path(dir,"Data/Other/il1b-vs-pbs.csv"),stringsAsFactors = F, header=F)
+#filtered by snRNASeq data (see 18_fibro_tgfb_score script)
+features_tgfb_filter = read.csv(file.path(dir,"Data/Other/tgfb-vs-pbs_fibro-specific-snRNASeq-filter.csv"),stringsAsFactors = F)
+features_tgfb_filter = features_tgfb_filter$x
+
+#Spp1 mac score from Hoeft et al
+# https://www.ncbi.nlm.nih.gov/pmc/articles/PMC9992450/
+features_spp1_mac = read.csv(file.path(dir,"Data/Other/Hoeft et al/spp1_mac.csv"),stringsAsFactors = F, header=F) 
+
+#Fab5 score from Fabre et al
+# https://www.science.org/doi/10.1126/sciimmunol.add8945
+#TREM2, CD9, SPP1, GPNMB, FABP5
+features_fab5 = list(c("Trem2", "Cd9", "Spp1", "Gpnmb", "Fabp5", "Cd63"))
+
+#Lrrc15 myofibroblast from Buechler et al
+# 10.1038/s41586-021-03549-5
+# 
+features_lrrc15_myofib = read.csv(file.path(dir,"Data/Other/Buechler et al/markers_lrrc15.csv"),stringsAsFactors = F, header=F) 
+
+#same dataset as above, but markers vs. pi16 adventitial subset
+features_lrrc15_v_pi16 = read.csv(file.path(dir,"Data/Other/Buechler et al/lrrc15_vs_pi16_markers_clean.csv"),stringsAsFactors = F, header=F) 
+
+#ADD MODULE SCORES
+
+vobj.merge.sub10 <- AddModuleScore(
+  vobj.merge.sub10,
+  features_prolif,
+  pool = NULL,
+  nbin = 24,
+  ctrl = 100,
+  name = "proliferation_score",
+  seed = 1,
+  search = TRUE,
+)
+#note - added as "proliferation_score1"
+
+vobj.merge.sub10 <- AddModuleScore(
+  vobj.merge.sub10,
+  features_tgfb,
+  pool = NULL,
+  nbin = 24,
+  ctrl = 100,
+  name = "tgfb_score",
+  seed = 1,
+  search = TRUE,
+)
+#note - added as "tgfb_score1"
+
+vobj.merge.sub10 <- AddModuleScore(
+  vobj.merge.sub10,
+  features_tgfb_filter,
+  pool = NULL,
+  nbin = 24,
+  ctrl = 100,
+  name = "tgfb_fibro_score",
+  seed = 1,
+  search = TRUE,
+)
+#note - added as "tgfb_fibro_score1"
+
+vobj.merge.sub10 <- AddModuleScore(
+  vobj.merge.sub10,
+  features_tnfa,
+  pool = NULL,
+  nbin = 24,
+  ctrl = 100,
+  name = "tnfa_score",
+  seed = 1,
+  search = TRUE,
+)
+#note - added as "tnfa_score1"
+
+vobj.merge.sub10 <- AddModuleScore(
+  vobj.merge.sub10,
+  features_ifng,
+  pool = NULL,
+  nbin = 24,
+  ctrl = 100,
+  name = "ifng_score",
+  seed = 1,
+  search = TRUE,
+)
+#note - added as "ifng_score1"
+
+vobj.merge.sub10 <- AddModuleScore(
+  vobj.merge.sub10,
+  features_il1b,
+  pool = NULL,
+  nbin = 24,
+  ctrl = 100,
+  name = "il1b_score",
+  seed = 1,
+  search = TRUE,
+)
+#note - added as "il1b_score1"
+
+vobj.merge.sub10 <- AddModuleScore(
+  vobj.merge.sub10,
+  features_spp1_mac,
+  pool = NULL,
+  nbin = 24,
+  ctrl = 100,
+  name = "spp1_mac_score",
+  seed = 1,
+  search = TRUE,
+)
+#note - added as "spp1_mac_score1"
+
+vobj.merge.sub10 <- AddModuleScore(
+  vobj.merge.sub10,
+  features_fab5,
+  pool = NULL,
+  nbin = 24,
+  ctrl = 100,
+  name = "fab5_score",
+  seed = 1,
+  search = TRUE,
+)
+#note - added as "fab5_score1"
+
+vobj.merge.sub10 <- AddModuleScore(
+  vobj.merge.sub10,
+  features_lrrc15_myofib,
+  pool = NULL,
+  nbin = 24,
+  ctrl = 100,
+  name = "lrrc15_myofib_score",
+  seed = 1,
+  search = TRUE,
+)
+#note - added as "lrrc15_myofib_score1"
+
+vobj.merge.sub10 <- AddModuleScore(
+  vobj.merge.sub10,
+  features_lrrc15_v_pi16,
+  pool = NULL,
+  nbin = 24,
+  ctrl = 100,
+  name = "lrrc15_v_pi16_score",
+  seed = 1,
+  search = TRUE,
+)
+#note - added as "lrrc15_v_pi16_score1"
+
+#PREPARE TO GRAPH
+Idents(vobj.merge.sub10) = "fib.timepoint"
+my_levels <- c("7dpi", "21dpi")
+my_levels = c("3", "6", "12", "21", "11", "20", "0", "17", "16", "9", "19", "5", "2", "4", "10_1", "22", "10_4", "1", "18", "7dpi", "21dpi", "14", "13", "23", "15", "10_2", "10_3", "7")
+levels(vobj.merge.sub10) = my_levels
+
+#------------PROLIF----------
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "prolif.eps"), width = 3.5, height = 4)
+VlnPlot(vobj.merge.sub10, idents = c("7dpi", "21dpi"), "proliferation_score1")
+dev.off()
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "spatial_prolif.eps"))
+SpatialFeaturePlot(vobj.merge.sub10, "proliferation_score1", images = c(image1, image2, image3))
+dev.off()
+
+#EQUALIZE SCALE BETWEEN 3 SECTIONS
+rng = range(vobj.merge.sub10$proliferation_score1) #a range to have the same min and max for both plots
+
+myPalette <- colorRampPalette(rev(brewer.pal(11, "Spectral")))
+sc <- scale_fill_gradientn(colours = myPalette(100), limits = c(rng[1], rng[2]), breaks = c(-0.1, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5))
+
+p1 = SpatialFeaturePlot(vobj.merge.sub10, "proliferation_score1", images = c(image1, image2, image3))
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "spatial_prolif_normalized_scale.eps"))
+p1[[1]] + sc + p1[[2]] + sc + p1[[3]] + sc
+dev.off()
+
+#------------TGFb----------
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "tgfb.eps"), width = 3.5, height = 4)
+VlnPlot(vobj.merge.sub10, idents = c("7dpi", "21dpi"), "tgfb_score1")
+dev.off()
+
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "spatial_tgfb.eps"))
+SpatialFeaturePlot(vobj.merge.sub10, "tgfb_score1", images = c(image1, image2, image3))
+dev.off()
+
+#EQUALIZE SCALE BETWEEN 3 SECTIONS
+rng = range(vobj.merge.sub10$tgfb_score1) #a range to have the same min and max for both plots
+
+myPalette <- colorRampPalette(rev(brewer.pal(11, "Spectral")))
+sc <- scale_fill_gradientn(colours = myPalette(100), limits = c(rng[1], rng[2]), breaks = c(0.0, 0.1, 0.2, 0.3, 0.4, 0.5))
+
+p1 = SpatialFeaturePlot(vobj.merge.sub10, "tgfb_score1", images = c(image1, image2, image3))
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "spatial_tgfb_normalized_scale.eps"))
+p1[[1]] + sc + p1[[2]] + sc + p1[[3]] + sc
+dev.off()
+
+#------------TGFb_filter----------
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "tgfb_fibro-filter.eps"))
+VlnPlot(vobj.merge.sub10, idents = c("7dpi", "21dpi"), "tgfb_fibro_score1")
+dev.off()
+
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "spatial_tgfb_fibro-filter.eps"))
+SpatialFeaturePlot(vobj.merge.sub10, "tgfb_fibro_score1", images = c(image1, image2, image3))
+dev.off()
+
+#EQUALIZE SCALE BETWEEN 3 SECTIONS
+rng = range(vobj.merge.sub10$tgfb_fibro_score1) #a range to have the same min and max for both plots
+
+myPalette <- colorRampPalette(rev(brewer.pal(11, "Spectral")))
+sc <- scale_fill_gradientn(colours = myPalette(100), limits = c(rng[1], rng[2]), breaks = c(0, 1, 2, 3))
+
+p1 = SpatialFeaturePlot(vobj.merge.sub10, "tgfb_fibro_score1", images = c(image1, image2, image3))
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "spatial_tgfb_fibro-filter_normalized_scale.eps"))
+p1[[1]] + sc + p1[[2]] + sc + p1[[3]] + sc
+dev.off()
+
+#------------TNFa----------
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "tnfa.eps"))
+VlnPlot(vobj.merge.sub10, idents = c("7dpi", "21dpi"), "tnfa_score1")
+dev.off()
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "spatial_tnfa.eps"))
+SpatialFeaturePlot(vobj.merge.sub10, "tnfa_score1", images = c(image1, image2, image3))
+dev.off()
+
+#EQUALIZE SCALE BETWEEN 3 SECTIONS
+rng = range(vobj.merge.sub10$tnfa_score1) #a range to have the same min and max for both plots
+
+myPalette <- colorRampPalette(rev(brewer.pal(11, "Spectral")))
+sc <- scale_fill_gradientn(colours = myPalette(100), limits = c(rng[1], rng[2]), breaks = c(0.0, 0.1, 0.2, 0.3, 0.4, 0.5))
+
+p1 = SpatialFeaturePlot(vobj.merge.sub10, "tnfa_score1", images = c(image1, image2, image3))
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "spatial_tnfa_normalized_scale.eps"))
+p1[[1]] + sc + p1[[2]] + sc + p1[[3]] + sc
+dev.off()
+
+#------------IFNy----------
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "ifng.eps"))
+VlnPlot(vobj.merge.sub10, idents = c("7dpi", "21dpi"), "ifng_score1")
+dev.off()
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "spatial_ifng.eps"))
+SpatialFeaturePlot(vobj.merge.sub10, "ifng_score1", images = c(image1, image2, image3))
+dev.off()
+
+#EQUALIZE SCALE BETWEEN 3 SECTIONS
+rng = range(vobj.merge.sub10$ifng_score1) #a range to have the same min and max for both plots
+
+myPalette <- colorRampPalette(rev(brewer.pal(11, "Spectral")))
+sc <- scale_fill_gradientn(colours = myPalette(100), limits = c(rng[1], rng[2]), breaks = c(-0.1, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5))
+
+p1 = SpatialFeaturePlot(vobj.merge.sub10, "ifng_score1", images = c(image1, image2, image3))
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "spatial_ifng_normalized_scale.eps"))
+p1[[1]] + sc + p1[[2]] + sc + p1[[3]] + sc
+dev.off()
+
+#------------IL1b----------
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "il1b.eps"))
+VlnPlot(vobj.merge.sub10, idents = c("7dpi", "21dpi"), "il1b_score1")
+dev.off()
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "spatial_il1b.eps"))
+SpatialFeaturePlot(vobj.merge.sub10, "il1b_score1", images = c(image1, image2, image3))
+dev.off()
+
+#EQUALIZE SCALE BETWEEN 3 SECTIONS
+rng = range(vobj.merge.sub10$il1b_score1) #a range to have the same min and max for both plots
+
+myPalette <- colorRampPalette(rev(brewer.pal(11, "Spectral")))
+sc <- scale_fill_gradientn(colours = myPalette(100), limits = c(rng[1], rng[2]), breaks = c(-0.1, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5))
+
+p1 = SpatialFeaturePlot(vobj.merge.sub10, "il1b_score1", images = c(image1, image2, image3))
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "spatial_il1b_normalized_scale.eps"))
+p1[[1]] + sc + p1[[2]] + sc + p1[[3]] + sc
+dev.off()
+
+#------------SPP1 mac score----------
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "spp1_mac.eps"))
+VlnPlot(vobj.merge.sub10, idents = c("7dpi", "21dpi"), "spp1_mac_score1")
+dev.off()
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "spatial_spp1_mac.eps"))
+SpatialFeaturePlot(vobj.merge.sub10, "spp1_mac_score1", images = c(image1, image2, image3))
+dev.off()
+
+#EQUALIZE SCALE BETWEEN 3 SECTIONS
+rng = range(vobj.merge.sub10$spp1_mac_score1) #a range to have the same min and max for both plots
+
+myPalette <- colorRampPalette(rev(brewer.pal(11, "Spectral")))
+sc <- scale_fill_gradientn(colours = myPalette(100), limits = c(rng[1], rng[2]), breaks = c(0.0, 0.2, 0.4, 0.6, 0.8))
+
+p1 = SpatialFeaturePlot(vobj.merge.sub10, "spp1_mac_score1", images = c(image1, image2, image3))
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "spatial_spp1_mac_normalized_scale.eps"))
+p1[[1]] + sc + p1[[2]] + sc + p1[[3]] + sc
+dev.off()
+
+#------------FAB5 mac score----------
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "fab5_mac.eps"))
+VlnPlot(vobj.merge.sub10, idents = c("7dpi", "21dpi"), "fab5_score1")
+dev.off()
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "spatial_fab5_mac.eps"))
+SpatialFeaturePlot(vobj.merge.sub10, "fab5_score1", images = c(image1, image2, image3))
+dev.off()
+
+#EQUALIZE SCALE BETWEEN 3 SECTIONS
+rng = range(vobj.merge.sub10$fab5_score1) #a range to have the same min and max for both plots
+
+myPalette <- colorRampPalette(rev(brewer.pal(11, "Spectral")))
+sc <- scale_fill_gradientn(colours = myPalette(100), limits = c(rng[1], rng[2]), breaks = c(-1, 0, 1, 2, 3))
+
+p1 = SpatialFeaturePlot(vobj.merge.sub10, "fab5_score1", images = c(image1, image2, image3))
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "spatial_fab5_mac_normalized_scale.eps"))
+p1[[1]] + sc + p1[[2]] + sc + p1[[3]] + sc
+dev.off()
+
+#------------Lrrc15 myofib score----------
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "lrrc15_myofib.eps"))
+VlnPlot(vobj.merge.sub10, idents = c("7dpi", "21dpi"), "lrrc15_myofib_score1")
+dev.off()
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "spatial_lrrc15_myofib.eps"))
+SpatialFeaturePlot(vobj.merge.sub10, "lrrc15_myofib_score1", images = c(image1, image2, image3))
+dev.off()
+
+#EQUALIZE SCALE BETWEEN 3 SECTIONS
+rng = range(vobj.merge.sub10$lrrc15_myofib_score1) #a range to have the same min and max for both plots
+
+myPalette <- colorRampPalette(rev(brewer.pal(11, "Spectral")))
+sc <- scale_fill_gradientn(colours = myPalette(100), limits = c(rng[1], rng[2]), breaks = c(-0.25, 0, 0.25, 0.5, 0.75, 1.0))
+
+p1 = SpatialFeaturePlot(vobj.merge.sub10, "lrrc15_myofib_score1", images = c(image1, image2, image3))
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "spatial_lrrc15_myofib_normalized_scale.eps"))
+p1[[1]] + sc + p1[[2]] + sc + p1[[3]] + sc
+dev.off()
+
+#------------Lrrc15 v pi16 specific myofib score----------
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "lrrc15_v_pi16.eps"))
+VlnPlot(vobj.merge.sub10, idents = c("7dpi", "21dpi"), "lrrc15_v_pi16_score1")
+dev.off()
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "spatial_lrrc15_v_pi16.eps"))
+SpatialFeaturePlot(vobj.merge.sub10, "lrrc15_v_pi16_score1", images = c(image1, image2, image3))
+dev.off()
+
+#EQUALIZE SCALE BETWEEN 3 SECTIONS
+rng = range(vobj.merge.sub10$lrrc15_v_pi16_score1) #a range to have the same min and max for both plots
+
+myPalette <- colorRampPalette(rev(brewer.pal(11, "Spectral")))
+sc <- scale_fill_gradientn(colours = myPalette(100), limits = c(rng[1], rng[2]), breaks = c(-0.25, 0, 0.25, 0.5, 0.75))
+
+p1 = SpatialFeaturePlot(vobj.merge.sub10, "lrrc15_v_pi16_score1", images = c(image1, image2, image3))
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "spatial_lrrc15_v_pi16_normalized_scale.eps"))
+p1[[1]] + sc + p1[[2]] + sc + p1[[3]] + sc
+dev.off()
+```
+
+
+```{r}
+#Calculate correlation of various genes - goal: see if fibroblast genes correlate with e.g. Ccl8
+Tablefolder = paste0(dir, "/Tables/Correlations/")
+gene_list = c("Cxcl12", "Ccl8", "Ccl19", "Cxcl16", "Tnf", "Ifng", "Il1b", "Il7", "Ccl2", "Ccl3", "Cxcl9", "Cxcl10", "Ccl5", "P2ry12", "Fcgr1", "Ccr2")
+
+for(gene_to_test in gene_list){
+  matrix<-vobj.merge.sub10@assays$Spatial@data
+  matrix_mod<-as.matrix(matrix)
+  gene<-as.numeric(matrix_mod[gene_to_test,])
+  correlations<-apply(matrix_mod,1,function(x){cor(gene,x)})
+  correlations_sorted <- sort(correlations, decreasing = TRUE)
+  correlations_sorted_other <- correlations_sorted[-1] #remove initial entry, gene_to_test itself
+  write.csv(correlations_sorted_other, paste0(Tablefolder, gene_to_test, "_correlations.csv"))
+}
+```
+
+***Add DAM module score***
+```{r}
+#code from Nick: "/Users/nathanewing-crystal/Dropbox (Ari Molofsky Lab)/Ari Molofsky Lab Team Folder/Nick Mroz/scRNAseq_R5 ST2Flox 14dpi/cortex scRNAseq/DAM Paper Gene Lists/DAMgenes.R"
+
+##set folder and file names
+DAMfolder = "/Users/nathanewing-crystal/Dropbox (Ari Molofsky Lab)/Ari Molofsky Lab Team Folder/Nick Mroz/scRNAseq_R5 ST2Flox 14dpi/cortex scRNAseq/DAM Paper Gene Lists"
+DAMgenesfile = "Keren-Shaul_Cell_2017_DAM DEGs.csv"
+Plotfolder = "Plots/myeloid"
+
+##load in csv of DAM genes
+DAMgenes = read.csv(file.path(DAMfolder,DAMgenesfile),stringsAsFactors = F)
+homeostatic_microgliagenes = read.csv(file.path(DAMfolder,DAMgenesfile),stringsAsFactors = F)
+
+#Select only the genes that pass pval threshold. Note that this spreadsheet has -log10(pval)
+DAMgenes = DAMgenes[DAMgenes$X.log10.DAM..p.value..Mann.Whitney. > 3,]
+homeostatic_microgliagenes = homeostatic_microgliagenes[homeostatic_microgliagenes$X.log10.DAM..p.value..Mann.Whitney. > 3,]
+
+#Select only positive logFCs
+DAMgenes = DAMgenes[DAMgenes$Fold.change..DAM.to.homeostatic.microglia. > 0,]
+homeostatic_microgliagenes = homeostatic_microgliagenes[homeostatic_microgliagenes$Fold.change..DAM.to.homeostatic.microglia. < 0,]
+
+
+#Select top 30 genes based on logFC
+topDAMgenes <- DAMgenes %>% top_n(30, Fold.change..DAM.to.homeostatic.microglia.) #only top 30 genes
+topDAMgenes = topDAMgenes[order(topDAMgenes$Fold.change..DAM.to.homeostatic.microglia., decreasing = T),]
+topDAMgenes = topDAMgenes$Gene.name
+
+tophomeostaticgenes <- homeostatic_microgliagenes %>% top_n(30, abs(Fold.change..DAM.to.homeostatic.microglia.)) #only top 30 genes (take absolute value of FC because homeostatic genes will be negative)
+tophomeostaticgenes = tophomeostaticgenes[order(tophomeostaticgenes$Fold.change..DAM.to.homeostatic.microglia., decreasing = F),]
+tophomeostaticgenes = tophomeostaticgenes$Gene.name
+
+#Note - not running below code
+  # 1) variable features not saved with vobj.merge.sub10 R file
+  # 2) unclear why should restrict DAM module score to variable features 
+
+#topDAMgenes[!topDAMgenes %in% VariableFeatures(vobj.merge.sub10)] #check if any genes are not in VariableFeatures(sobject)
+#topDAMgenes = topDAMgenes[c(1,3:6,8,10:13,15:19,21:30)] #removed genes that are not in VariableFeature(sobject)
+
+##Module Feature Score
+#convert topDAMgenes into a list with length=1
+topDAMgeneslist = list()
+topDAMgeneslist[[1]] = topDAMgenes
+
+vobj.merge.sub10 <- AddModuleScore(
+  vobj.merge.sub10,
+  topDAMgeneslist,
+  pool = NULL,
+  nbin = 24,
+  ctrl = 100,
+  name = "DAM_score",
+  seed = 1,
+  search = TRUE,
+)
+#note - added as "DAM_score1"
+
+tophomeostaticgeneslist = list()
+tophomeostaticgeneslist[[1]] = tophomeostaticgenes
+
+vobj.merge.sub10 <- AddModuleScore(
+  vobj.merge.sub10,
+  tophomeostaticgeneslist,
+  pool = NULL,
+  nbin = 24,
+  ctrl = 100,
+  name = "homeostatic_MG_score",
+  seed = 1,
+  search = TRUE,
+)
+#note - added as "homeostatic_MG_score1"
+
+#Plot spatial DAM score; EQUALIZE SCALE BETWEEN 3 SECTIONS
+rng = range(vobj.merge.sub10$DAM_score1) #a range to have the same min and max for both plots
+
+myPalette <- colorRampPalette(rev(brewer.pal(11, "Spectral")))
+sc <- scale_fill_gradientn(colours = myPalette(100), limits = c(rng[1], rng[2]), breaks = c(-0.5, -0, 0.5, 1.0))
+
+p1 = SpatialFeaturePlot(vobj.merge.sub10, "DAM_score1", images = c(image1, image2, image3))
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "spatial_DAM_normalized_scale.eps"))
+p1[[1]] + sc + p1[[2]] + sc + p1[[3]] + sc
+dev.off()
+
+#Plot spatial homeostatic score; EQUALIZE SCALE BETWEEN 3 SECTIONS
+rng = range(vobj.merge.sub10$homeostatic_MG_score1) #a range to have the same min and max for both plots
+
+myPalette <- colorRampPalette(rev(brewer.pal(11, "Spectral")))
+sc <- scale_fill_gradientn(colours = myPalette(100), limits = c(rng[1], rng[2]), breaks = c(-0.2, -0.1, 0.0, 0.1, 0.2, 0.3))
+
+p1 = SpatialFeaturePlot(vobj.merge.sub10, "homeostatic_MG_score1", images = c(image1, image2, image3))
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "spatial_homeostatic_MG_normalized_scale.eps"))
+p1[[1]] + sc + p1[[2]] + sc + p1[[3]] + sc
+dev.off()
+
+#plot cell type markers vs. TGFb1
+#cell type categories (myeloid):
+DAMscore = vobj.merge.sub10$DAM_score1
+homeoscore = vobj.merge.sub10$homeostatic_MG_score1
+Ccr2 = vobj.merge.sub10@assays$Spatial@scale.data["Ccr2",]
+Fcgr1 = vobj.merge.sub10@assays$Spatial@scale.data["Fcgr1",]
+types = list(DAMscore, homeoscore, Ccr2, Fcgr1)
+type_names = c("DAM Score", "Homeostatic MG Score", "Ccr2", "Fcgr1")
+#correlate with y = Tgfb1 expression
+y = vobj.merge.sub10@assays$Spatial@scale.data["Tgfb1",]
+
+for(i in 1:length(type_names)){
+  x = types[[i]]
+  exp_data = data.frame(x, y)
+  name = type_names[[i]]
+  p1 = ggscatter(exp_data, x = "x", y = "y", 
+          title = paste0(name, " vs. TGFb1 Expression"),
+          add = "reg.line", conf.int = TRUE, add.params=list(color="red"),
+          cor.coef = TRUE, cor.method = "pearson", cor.coef.size = 5,
+          xlab = name, ylab = "TGFb1 expression")
+  setEPS()
+  postscript(file.path(dir, Plotfolder, paste0(name, "_Tgfb1_correlation_xy.eps")))
+  p1
+  dev.off()
+}
+
+#plot cell type markers vs. TGFb1 **ONLY FOR 2dpi***
+#cell type categories (myeloid):
+subset_2dpi <- subset(vobj.merge.sub10, timepoint == "2dpi")
+DAMscore = subset_2dpi$DAM_score1
+homeoscore = subset_2dpi$homeostatic_MG_score1
+Ccr2 = subset_2dpi@assays$Spatial@scale.data["Ccr2",]
+Fcgr1 = subset_2dpi@assays$Spatial@scale.data["Fcgr1",]
+types = list(DAMscore, homeoscore, Ccr2, Fcgr1)
+type_names = c("DAM Score", "Homeostatic MG Score", "Ccr2", "Fcgr1")
+#correlate with y = Tgfb1 expression
+y = subset_2dpi@assays$Spatial@scale.data["Tgfb1",]
+
+for(i in 1:length(type_names)){
+  x = types[[i]]
+  exp_data = data.frame(x, y)
+  name = type_names[[i]]
+  p1 = ggscatter(exp_data, x = "x", y = "y", 
+          title = paste0(name, " vs. TGFb1 Expression (2dpi)"),
+          add = "reg.line", conf.int = TRUE, add.params=list(color="red"),
+          cor.coef = TRUE, cor.method = "pearson", cor.coef.size = 5,
+          xlab = name, ylab = "TGFb1 expression")
+  setEPS()
+  postscript(file.path(dir, Plotfolder, paste0(name, "_Tgfb1_correlation_xy_2dpi.eps")))
+  p1
+  dev.off()
+}
+
+#Calculate correlation of DAM score to all other genes
+Tablefolder = paste0(dir, "/Tables/Correlations/")
+
+matrix<-vobj.merge.sub10@assays$Spatial@data
+matrix_mod<-as.matrix(matrix)
+gene<-as.numeric(vobj.merge.sub10$DAM_score1)
+correlations<-apply(matrix_mod,1,function(x){cor(gene,x)})
+correlations_sorted <- sort(correlations, decreasing = TRUE)
+correlations_sorted_other <- correlations_sorted[-1] #remove initial entry, gene_to_test itself
+write.csv(correlations_sorted_other, paste0(Tablefolder, "DAM_score_correlations.csv"))
+
+```
+```{r}
+#Plot # features
+setEPS()
+postscript(file.path(dir, Plotfolder, "nCount_Spatial.eps"))
+SpatialFeaturePlot(vobj.merge.sub10, feature = "nFeature_Spatial", images = c(image1, image2, image3))
+dev.off()
+```
+
+
+```{r}
+save(vobj.merge.sub10,file = file.path(dir, datafolder,paste0(project,"_vobj.merge.sub10",iterationname,".RData")))
+```
+
+#GRAPHS FOR FIGURE
+```{r}
+Plotfolder = "Plots/figure"
+name = "Col1a1_feature.eps"
+
+#EQUALIZE SCALE BETWEEN 3 SECTIONS
+rng = range(vobj.merge.sub10@assays$Spatial["Col1a1",]) #a range to have the same min and max for both plots
+
+myPalette <- colorRampPalette(rev(brewer.pal(11, "Spectral")))
+sc <- scale_fill_gradientn(colours = myPalette(100), limits = c(rng[1], rng[2]), breaks = c(0, 2, 4))
+
+p1 = SpatialFeaturePlot(vobj.merge.sub10, "Col1a1", images = c(image1, image2, image3))
+
+setEPS()
+postscript(file.path(dir, Plotfolder, name))
+p1[[1]] + sc + p1[[2]] + sc + p1[[3]] + sc
+dev.off()
+
+options(ggrepel.max.overlaps = Inf)
+Idents(vobj.merge.sub10) = "sub.cluster"
+
+p1 <- SpatialDimPlot(vobj.merge.sub10, images = image1, label=T, repel = T, label.size = 2) + theme(legend.position = "none")
+p2 <- SpatialDimPlot(vobj.merge.sub10, images = image2, label=T, repel = T, label.size = 2) + theme(legend.position = "none")
+p3 <- SpatialDimPlot(vobj.merge.sub10, images = image3, label=T, repel = T, label.size = 2) + theme(legend.position = "none")
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "labeled_umap.eps"))
+p1 + p2 + p3
+dev.off()
+
+Idents(vobj.merge.sub10) = "sub.cluster"
+markers = FindAllMarkers(
+  object = vobj.merge.sub10,
+  assay = "Spatial",
+  test.use = "MAST",
+  only.pos = FALSE,
+  min.pct = 0.05,
+  logfc.threshold = 0.2)
+
+write.csv(markers, paste0(dir, "/Tables/markers_all_subcluster.csv"))
+
+defile = "markers_all_subcluster.csv"
+markers = read.csv(file.path(dir,"Tables", defile),stringsAsFactors = F) #any   spreadsheet with gene symbols or other identifiers
+
+#Select only the genes that pass thresholds
+markers = markers[markers$p_val_adj<pval,]
+
+#pick only positives, or restrict by min/max pct expression using pct1/2
+markers = markers[markers$avg_log2FC > lfc,] #make log2FC >0.2 for heatmaps, >0 for volcano plots
+markers = markers[markers$pct.1 > minpct & markers$pct.2 < maxpct,]
+
+table(markers$cluster)
+
+#dotplot for figure
+topgenes <- markers %>% group_by(cluster) %>% top_n(3, avg_log2FC) #top 10 genes
+#switch cluster name to seurat cluster
+
+#ORDER
+topgenes$cluster2 = gsub("_", ".", topgenes$cluster)
+
+topgenes = topgenes[order(as.numeric(as.character(topgenes$cluster2))),]
+levels(vobj.merge.sub10) = unique(topgenes$cluster)
+
+setEPS()
+postscript(file.path(dir,Plotfolder, paste0(project,"_",iterationname, "dotplot.eps")), width = 12.5)
+DotPlot(vobj.merge.sub10, assay = "Spatial", features = unique(c(topgenes$gene)), cols = "RdBu") + theme(axis.text.x = element_text(angle = 90, hjust = 0.95))
+dev.off()
+
+conserved_fib_genes = c("Pdgfra", "Col1a1", "Col5a1", "Col6a1", "Col7a1", "Dcn")
+
+setEPS()
+postscript(file.path(dir,Plotfolder, paste0(project,"_",iterationname, "fibroblast_genes_dotplot.eps")), height = 6, width = 6)
+DotPlot(vobj.merge.sub10, assay = "Spatial", features = conserved_fib_genes, cols = "RdBu") + theme(axis.text.x = element_text(angle = 90, hjust = 0.95))
+dev.off()
+
+setEPS()
+postscript(file.path(dir,Plotfolder, paste0(project,"_",iterationname, "Col1a1_violin.eps")), width = 9, height = 7)
+VlnPlot(vobj.merge.sub10, "Col1a1")
+dev.off()
+
+```
+***MAP snRNASeq clusters via module score***
+```{r}
+Plotfolder = "Plots/module_score/snRNASeq Mapping"
+
+Idents(vobj.merge.sub10) = "sub.cluster"
+name = paste0(project, iterationname)
+  
+#Map sn clusters (NEC127) onto Visium
+old_markers_path = "/Users/nathanewing-crystal/Ari Molofsky Lab Dropbox/Ari Molofsky Lab Team Folder/Nathan Ewing-Crystal/RNASeq/Lesion snRNASeq/seurat/Spreadsheets/lesion_snRNASeq_fib_reclustered_all_markers.csv"
+old_markers = read.csv(old_markers_path,stringsAsFactors = F)
+
+old_clusters = levels(factor(old_markers$cluster))
+old_cluster_names = c("Meninges_1", "Lama1", "Tmeff2", "Meninges_2", "Ptgds", "Fn1", "Cd80", "Myeloid", "Meninges_3", "Ghr", "Nrxn1-3", "Mural_Pericyte", "Meninges_4", "Prolif", "Meninges_5")
+names(old_clusters) = old_cluster_names
+old_clusters = old_clusters[-c(8,11)]
+old_cluster_names = old_cluster_names[-c(8,11)]
+
+plots = list()
+
+for(i in 1:length(old_clusters)){
+  old_cluster = old_clusters[i]
+  cluster_name = old_cluster_names[i]
+  old_genes = old_markers[old_markers$cluster == old_cluster & old_markers$avg_log2FC > 0,]$gene
+  #convert  into a list with length=1
+  old_genes_list = list()
+  old_genes_list[[1]] = old_genes
+  vobj.merge.sub10 <- AddModuleScore(
+    vobj.merge.sub10,
+    old_genes_list,
+    pool = NULL,
+    nbin = 24,
+    ctrl = 100,
+    name = paste0(cluster_name, "_score"),
+    seed = 1,
+    search = TRUE)
+    
+    feature_name = paste0(cluster_name, "_score1")
+    print(VlnPlot(vobj.merge.sub10, feature_name))
+    #PrintSeuratGraph(seurat_object = vobj.merge.sub10, namecard = name,graphtype = "violin",feature = feature_name,group = "sub.cluster")
+}
+```
+```{r}
+#for figure
+
+p1 = VlnPlot(vobj.merge.sub10, c("Lama1_score1", "Ptgds_score1", "Tmeff2_score1"), stack=T, same.y.lims=T)
+p2 = VlnPlot(vobj.merge.sub10, c("Prolif_score1", "Fn1_score1", "Ghr_score1", "Cd80_score1", "Lama1_score1", "Ptgds_score1", "Tmeff2_score1"), stack=T, same.y.lims=T)
+p3 = VlnPlot(vobj.merge.sub10, c("Prolif_score1", "Fn1_score1", "Ghr_score1", "Cd80_score1", "Lama1_score1", "Ptgds_score1", "Tmeff2_score1"), stack=T, same.y.lims=T, flip = T)
+p4 = DotPlot(vobj.merge.sub10, assay = "Spatial", features = c("Prolif_score1", "Fn1_score1", "Ghr_score1", "Cd80_score1", "Lama1_score1", "Ptgds_score1", "Tmeff2_score1"), cols = "RdBu") + theme(axis.text.x = element_text(angle = 90, hjust = 0.95))  + coord_flip()
+  #not using
+
+
+ordered = c("0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10_0", "10_1", "10_2", "10_3", "10_4", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23")
+p1$data$ident <- factor(x = p1$data$ident, levels = ordered)
+p2$data$ident <- factor(x = p2$data$ident, levels = ordered)
+p3$data$ident <- factor(x = p3$data$ident, levels = ordered)
+p4$data$id <- factor(x = p4$data$id, levels = ordered)
+
+setEPS()
+postscript(file.path(dir,Plotfolder, paste0(project,"_",iterationname, "snseq_mapping_meningeal")), height = 6, width = 6)
+p1
+dev.off()
+
+setEPS()
+postscript(file.path(dir,Plotfolder, paste0(project,"_",iterationname, "snseq_mapping_all")), height = 5.25, width = 6)
+p2
+dev.off()
+
+setEPS()
+postscript(file.path(dir,Plotfolder, paste0(project,"_",iterationname, "snseq_mapping_all_FLIP")), height = 4.75, width = 13)
+p3 + theme(axis.text.x = element_text(angle = 90))
+dev.off()
+```
+
