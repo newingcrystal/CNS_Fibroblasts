@@ -172,6 +172,7 @@ p2 <- SpatialDimPlot(vobj_C_subset, label = TRUE, label.size = 3)
 p1 + p2
 ```
 
+#Note - capture area 4 not analyzed in paper
 ```{r}
 filepath <- file.path("/mnt/DATA/molofsky_lab/newing-crystal/Visium/SpaceRanger/NEC_D1_21dpi_deleter/outs")
 vobj_D <- Load10X_Spatial(filepath, filename = "filtered_feature_bc_matrix.h5", assay = "Spatial", slice = "D:21dpi Deleter", filter.matrix = TRUE)
