@@ -35,7 +35,7 @@ MYELOID: subset to myeloid cells
 
 ----------------------------------------------------------------------------------------------
 
-MYELOID: subset to T cells (including NK, ILC, etc.)
+T: subset to T cells (including NK, ILC, etc.)
 
 1) subset - not reclustered
 
