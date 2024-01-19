@@ -1,0 +1,218 @@
+---
+title: "Bourne"
+author: "Nathan Ewing-Crystal"
+date: "7/28/2022"
+output: html_document
+---
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r}
+install.packages('Seurat')
+library(Seurat)
+install.packages('ggplot2')
+library(ggplot2)
+install.packages('dplyr')
+library(dplyr)
+install.packages('ape')
+library(ape)
+install.packages('cowplot')
+library(cowplot)
+install.packages('Matrix')
+library(Matrix)
+install.packages('EnhancedVolcano')
+library(EnhancedVolcano)
+install.packages('knitr')
+library(knitr)
+install.packages('readr')
+library(readr)
+if (!require("BiocManager", quietly = TRUE))
+     install.packages("BiocManager")
+BiocManager::install("MAST")
+library(MAST)
+install.packages('gplots')
+library(gplots)
+```
+
+*Edit the following code every time* 
+and make sure the folders "QC" and "Plots" and "Heatmaps" and "Trees" and "Spreadsheets" and "Data/Seurat" are present in the "dir" folder
+```{r}
+#Specify your preferred directory for all input + output
+dir="/mnt/DATA/molofsky_lab/newing-crystal"
+setwd(dir)
+
+#Specify exactly where your seurat files live
+datafolder = "Data"
+
+#This name needs to match your project name within the seurat object
+project<-"astrocyte-stroke" 
+
+#set up folders
+#QCfolder = "QC"
+Plotfolder = "Plots"
+
+#Important genes to determine your cells of interest
+igenes = c("COL1A1", "PDGFRA", "PDGFRB", "DCN", "TGFBR2", "ITGB8", "ITGB1", "ITGAV", "OLIG2", "GFAP", "PTPRC", "ITGAM", "DES")
+
+#make a unique name; maybe this is the celltype you've already subset, or the age you're looking at, etc.
+iterationname = "v1"
+
+#Establish cutoffs for heatmaps
+pval = 1e-3 #max p-value for significance
+lfc = 0.2 #minimum log fold change
+minpct = 0.05 #if you want to subset by percent cells in that cluster expressing the gene
+maxpct = 1
+single = F #should each gene be a marker of a single cluster only
+hgenes = 3 #how many genes should be in the heatmap per cluster
+ncells = 100 #max # of cells per heatmap column
+#column = "sub.cluster" #division you care about
+
+```
+
+```{r}
+filename <- file.path(dir, "Bourne Astrocytes/yale integrated unlabelled.rds")
+sobj <- readRDS(filename)
+DefaultAssay(sobj) <- "RNA"
+sobj <- ScaleData(sobj)
+#already normalized
+```
+
+
+```{r}
+FeaturePlot(sobj, "COL1A1")
+FeaturePlot(sobj, "CD3E")
+DimPlot(sobj)
+```
+
+Function to print multiple graphs: 
+```{r}
+PrintSeuratGraph = function(namecard = "a",seurat_object = sobj,graphtype = "feature",feature = NULL,group = NULL,split=NULL,cellnames=NULL){
+  if (!is.null(cellnames)){
+    Idents(seurat_object) = cellnames[1]
+    cells = colnames(seurat_object)[Idents(seurat_object) %in% cellnames[2:length(cellnames)]]} 
+  else {cells = cellnames}
+  if (graphtype == "feature"){
+    graph = FeaturePlot(seurat_object,features = feature,split.by = split, cells = cells,cols = c("lightyellow","darkred"))
+  }
+  if (graphtype == "violin"){
+    graph = VlnPlot(seurat_object,features = feature, pt.size = 0.1, idents = cellnames[2:length(cellnames)],group.by = group, split.by = split)
+  }
+  if (graphtype == "dim"){
+    graph = DimPlot(seurat_object,cells = cells, group.by = group, split.by = split)
+    
+  }
+  name = paste0(feature,"_",graphtype,namecard,".eps")
+  graph
+  setEPS()
+  postscript(file.path(dir,Plotfolder,name))
+  print(graph)
+  dev.off()
+}
+```
+
+Block to print multiple graphs: 
+```{r}
+dir = "/mnt/DATA/molofsky_lab/newing-crystal/Bourne Astrocytes"
+
+name = paste0(project,iterationname)
+genes = igenes
+genes = genes[genes %in% rownames(GetAssayData(sobj,slot = "data"))]
+
+for(feature in genes){
+  PrintSeuratGraph(namecard = name,graphtype = "feature",feature = feature)
+}
+
+
+#dim plots for clustering
+PrintSeuratGraph(namecard = name,graphtype = "dim")
+
+#violin plots
+for(feature in genes){
+  PrintSeuratGraph(namecard = name,graphtype = "violin",feature = feature,group = "seurat_clusters")
+}
+```
+
+
+```{r}
+# markers_all = FindAllMarkers(
+#   object = sobj,
+#   features = rownames(sobj),
+#   test.use = "MAST", 
+#   only.pos = FALSE, 
+#   min.pct = 0.05, 
+#   logfc.threshold = 0.2)
+markers18 = FindMarkers(
+  object = sobj,
+  ident.1 = 18,
+  features = rownames(sobj),
+  test.use = "MAST",
+  only.pos = FALSE,
+  min.pct = 0.05,
+  logfc.threshold = 0.2)
+
+write.csv(markers18, 
+           "../Tables/cluster18.csv")
+
+PrintSeuratGraph(namecard = name,graphtype = "feature",feature = "CD3E")
+PrintSeuratGraph(namecard = name,graphtype = "violin",feature = "CD3E")
+
+markers12 = FindMarkers(
+  object = sobj,
+  ident.1 = 12,
+  features = rownames(sobj),
+  test.use = "MAST",
+  only.pos = FALSE,
+  min.pct = 0.05,
+  logfc.threshold = 0.2)
+
+write.csv(markers12, 
+           "../Tables/cluster12.csv")
+```
+```{r}
+#Subcluster #18
+
+sobj_sub18 <- FindSubCluster(
+  sobj,
+  18,
+  graph.name = "integrated_snn",
+  subcluster.name = "sub.cluster",
+  resolution = 0.5,
+  algorithm = 1
+)
+
+sobj_sub18 <- SetIdent(sobj_sub18, value = sobj_sub18@meta.data$sub.cluster)
+DimPlot(sobj_sub18, label = TRUE)
+
+#Subset to new seurat object with only fibroblasts
+sobj_sub18 <- SetIdent(sobj_sub18, value = sobj_sub18@meta.data$seurat_clusters)
+sub18 <- subset(sobj_sub18, idents = 18)
+
+#Plot
+sub18 <- SetIdent(sub18, value = sub18@meta.data$sub.cluster)
+DimPlot(sub18, reduction = "umap", label = TRUE, label.size = 6)
+name = "astrocyte-strokev1_sub18_"
+PrintSeuratGraph(namecard = name, seurat_object = sub18, graphtype = "feature", feature = "COL1A1")
+```
+```{r}
+#Default assay is already RNA
+markers_fibroblast_subsets = FindAllMarkers(
+  object = sub18,
+  features = rownames(sub18),
+  test.use = "MAST",
+  only.pos = FALSE,
+  min.pct = 0.05,
+  logfc.threshold = 0.2)
+
+write.csv(markers_fibroblast_subsets, 
+           "../Tables/fibroblast_subsets.csv")
+
+```
+
+```{r}
+save(sobj_sub18,file = file.path(dir,datafolder,paste0(project,"_with-subclustered-fib_",iterationname,".RData")))
+save(sub18,file = file.path(dir,datafolder,paste0(project,"_subclustered-fib-only_",iterationname,".RData")))
+```
