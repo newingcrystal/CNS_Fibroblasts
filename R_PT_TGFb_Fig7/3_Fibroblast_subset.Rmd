@@ -1,0 +1,1168 @@
+---
+title: "Fib subset"
+author: "Nathan Ewing-Crystal"
+date: "2023-05-15"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#if (!require("BiocManager", quietly = TRUE))
+    #install.packages("BiocManager")
+
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+library(ape)
+library(cowplot)
+library(Matrix)
+library(variancePartition)
+library(MAST)
+#BiocManager::install("EnhancedVolcano")
+library(EnhancedVolcano)
+
+#BiocManager::install("goseq")
+library(goseq)
+#BiocManager::install("TxDb.Mmusculus.UCSC.mm10.ensGene")
+library(TxDb.Mmusculus.UCSC.mm10.ensGene)
+#BiocManager::install("org.Mm.eg.db")
+library(org.Mm.eg.db)
+#BiocManager::install("clusterProfiler")
+library(clusterProfiler)
+
+#BiocManager::install("Nebulosa")
+library("Nebulosa")
+
+#remotes::install_github('satijalab/seurat-wrappers')
+library(SeuratWrappers)
+library(presto)
+```
+
+#Load filtered seurat object
+```{r}
+load(file.choose())
+```
+
+```{r}
+#Specify your preferred directory for all input + output
+dir = "/Users/nathanewing-crystal/Ari Molofsky Lab Dropbox/Ari Molofsky Lab Team Folder/Nathan Ewing-Crystal/RNASeq/Lesion snRNASeq 2 Tgfb/seurat"
+#Specify exactly where your seurat files live
+datafolder = "Data/Seurat/Fibroblast Subset"
+
+project<-"tgfb_lesion_snRNASeq"  
+
+#set up folders
+Plotfolder = "Plots/Fibroblast Subset"
+
+#Decide whether to use SCtransform (can take a long time with big datasets; generally recommended)
+sct = TRUE
+
+#You can add in housekeeping genes if you want them to be scaled always; otherwise set to "NULL"
+add.genes = NULL
+
+#How many genes do you want scaled to use for UMAP/clustering? 
+ngenes = 6000
+
+#Which principal components do you want to calculate on? This is a default setting, change if one of the pc's is for something you think is a technical error (i.e. HSP, RP, etc)
+pcs = c(1:30)
+
+#Choose what to regress out - could be age, sex, or any metadata column
+regress = c("nCount_RNA","percent.mito")
+
+#clustering resolution; the last number will be saved as "seurat_clusters" in metadata
+res = c(1.5,1.0,0.5, 0.4, 0.3, 0.25, 0.2, 0.15, 0.1)
+
+#metadata dimensions you want to cluster on
+dims = c("seurat_clusters","sample", "subsample", "timepoint","genotype", "microanatomy")
+
+#make a unique name; maybe this is the celltype you've already subset, or the age you're looking at, etc.
+iterationname = "fib_reclustered"
+
+#Establish cutoffs for heatmaps
+pval = 1e-3 #max p-value for significance
+lfc = 0.2 #minimum log fold change
+minpct = 0.05 #if you want to subset by percent cells in that cluster expressing the gene
+maxpct = 1
+single = F #should each gene be a marker of a single cluster only
+hgenes = 3 #how many genes should be in the heatmap per cluster
+ncells = 100 #max # of cells per heatmap column
+column = "seurat_clusters" #division you care about
+```
+
+Find variable features, normalize, scale, run PCA, clustering, umap
+The following is the standard method of normalization and scaling. Interchangeable with the next chunk. Run both, you should have already specified which to use with "sct = T or F". Will take 5-20 minutes to run. 
+```{r,results = 'hide',eval = FALSE}
+if (!sct){
+  sobject.sub.fib <- NormalizeData(sobject.sub.fib,normalization.method = "LogNormalize", scale.factor = 10000)
+  sobject.sub.fib<-FindVariableFeatures(sobject.sub.fib, selection.method = "vst", nfeatures = ngenes)
+  
+  all.genes<-rownames(sobject.sub.fib)
+  var.genes = VariableFeatures(sobject.sub.fib)
+  add.genes = add.genes[!add.genes %in% var.genes]
+  
+  any(add.genes %in% var.genes)
+  scalegenes = c(var.genes,add.genes)
+  VariableFeatures(sobject.sub.fib) = scalegenes
+  sobject.sub.fib<-ScaleData(sobject.sub.fib,features = VariableFeatures(sobject.sub.fib), vars.to.regress = regress)
+}
+```
+
+Alternative: SCTransform (great for smaller datasets)
+```{r, results='hide',eval = FALSE}
+if (sct){
+  sobject.sub.fib <- SCTransform(sobject.sub.fib, vars.to.regress = regress, verbose = FALSE,variable.features.n = ngenes,conserve.memory = T)
+}
+```
+
+Show most variable genes
+```{r}
+labels <- c(head(VariableFeatures(sobject.sub.fib),10),add.genes)
+plot1 = VariableFeaturePlot(sobject.sub.fib)
+LabelPoints(plot=plot1, points = labels, repel = F, xnudge = 0.1, ynudge = 0.5)
+```
+
+Run PCA analysis and show elbow plot
+```{r}
+sobject.sub.fib <- RunPCA(sobject.sub.fib,features = VariableFeatures(sobject.sub.fib),npcs = 50, verbose = FALSE)
+ElbowPlot(sobject.sub.fib,ndims = 50, reduction = "pca")
+print(sobject.sub.fib[["pca"]], dims = 1:20, nfeatures = 5)
+```
+
+Once you are satisfied with pc's, run clustering: 
+```{r}
+sobject.sub.fib<-RunUMAP(sobject.sub.fib,reduction = "pca",dims = pcs, verbose = F)
+sobject.sub.fib<-FindNeighbors(sobject.sub.fib,dims=pcs,verbose=F)
+sobject.sub.fib<-FindClusters(sobject.sub.fib,verbose=F,resolution = res)
+sobject.sub.fib$seurat_clusters = sobject.sub.fib$SCT_snn_res.0.2
+Idents(sobject.sub.fib) = "seurat_clusters"
+```
+
+Function to print multiple graphs: 
+```{r}
+PrintSeuratGraph = function(namecard = "a",seurat_object = sobject.sub.fib,graphtype = "feature",feature = NULL,group = NULL,split=NULL,cellnames=NULL, label=FALSE){
+  if (!is.null(cellnames)){
+    #Idents(seurat_object) = cellnames[1]
+    #cells = colnames(seurat_object)[Idents(seurat_object) %in% cellnames[1:length(cellnames)]]} 
+    cells = cellnames}
+  else {cells = cellnames}
+  if (graphtype == "feature"){
+    graph = FeaturePlot(seurat_object,features = feature,split.by = split, cells = cells,cols = c("lightyellow","darkred"))
+  }
+  if (graphtype == "violin"){
+    graph = VlnPlot(seurat_object,features = feature, pt.size = 0.1, idents = cellnames[2:length(cellnames)],group.by = group, split.by = split)
+  }
+  if (graphtype == "dim"){
+    graph = DimPlot(seurat_object,cells = cells, group.by = group, split.by = split, label = label)
+  }
+  name = paste0(feature,"_",graphtype,namecard,".eps")
+  graph
+  setEPS()
+  postscript(file.path(dir,Plotfolder,name))
+  print(graph)
+  dev.off()
+}
+```
+
+Save the clustered dataset. Overwrite the existing, subset dataset. 
+```{r,eval = FALSE}
+save(sobject.sub.fib,file = file.path(dir,datafolder,paste0(project,"_",iterationname,".RData")))
+```
+
+Block to print multiple graphs: 
+```{r}
+Plotfolder = "Plots/Fibroblast Subset"
+DefaultAssay(sobject.sub.fib) = "RNA"
+
+name = paste0(project,"_",iterationname)
+genes = c("Col1a2", "Cthrc1", "Fn1", "Cd80", "Cxcl12", "Ghr", "Lama1", "Ptgds", "Tmeff2", "Cspg4")
+groups = c("timepoint", "condition", "seurat_clusters", "fibtype", "fibtypecluster")
+#note - added "fibtype" and "fibtypecluster" from below
+genes = genes[genes %in% rownames(GetAssayData(sobject.sub.fib,slot = "data"))]
+
+for(feature in genes){
+  PrintSeuratGraph(namecard = name,graphtype = "feature",feature = feature)
+}
+
+#dim plots for clustering
+for(group in groups){
+  PrintSeuratGraph(namecard = name,graphtype = "dim",group = group, feature = group)
+  PrintSeuratGraph(namecard = paste0(name,"_labeled_"),graphtype = "dim",group = group, feature = group, label = TRUE)
+  PrintSeuratGraph(namecard = paste0(name, "_split_"), graphtype = "dim", feature = group, split=group)
+}
+
+#violin plots
+for(feature in c(genes)){
+  PrintSeuratGraph(namecard = name,graphtype = "violin",feature = feature,group = "seurat_clusters")
+}
+
+PrintSeuratGraph(namecard = paste0(name, "_timepoint-condition"), graphtype = "dim", group = "timepoint", split = "condition")
+PrintSeuratGraph(namecard = paste0(name, "_condition-timepoint"), graphtype = "dim", group = "condition", split = "timepoint")
+
+PrintSeuratGraph(namecard = paste0(name, "_fibtype-condition"), graphtype = "dim", group = "fibtype", split = "condition")
+
+Plotfolder = "Plots/Figure"
+sobject.sub.fib$condition = factor(sobject.sub.fib$condition, levels = c("WT", "cKO", "ADWA11"))
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "fibtype_condition.eps"), width = 12)
+DimPlot(sobject.sub.fib, group.by = "fibtype", split.by = "condition", label=F) + NoLegend()
+dev.off()
+setEPS()
+postscript(file.path(dir, Plotfolder, "timepoint_condition_fib.eps"), width = 12)
+DimPlot(sobject.sub.fib, group.by = "timepoint", split.by = "condition", label=F)
+dev.off()
+```
+***NOTE - WITH DOUBLETS, MOVED TO "OLD WITH DOUBLETS FOLDER***
+```{r}
+Plotfolder = "Plots/Fibroblast Subset/Old Seq Mapping"
+  
+#Map old clusters (NEC127) onto new clusters (NEC190)
+old_markers_path = "/Users/nathanewing-crystal/Ari Molofsky Lab Dropbox/Ari Molofsky Lab Team Folder/Nathan Ewing-Crystal/RNASeq/Lesion snRNASeq/seurat/Spreadsheets/lesion_snRNASeq_fib_reclustered_all_markers.csv"
+old_markers = read.csv(old_markers_path,stringsAsFactors = F)
+
+old_clusters = levels(factor(old_markers$cluster))
+old_cluster_names = c("Meninges_1", "Lama1", "Tmeff2", "Meninges_2", "Ptgds", "Fn1", "Cd80", "Myeloid", "Meninges_3", "Ghr", "Nrxn1-3", "Mural_Pericyte", "Meninges_4", "Prolif", "Meninges_5")
+names(old_clusters) = old_cluster_names
+old_clusters = old_clusters[-c(8,11)]
+old_cluster_names = old_cluster_names[-c(8,11)]
+
+plots = list()
+
+for(i in 1:length(old_clusters)){
+  old_cluster = old_clusters[i]
+  cluster_name = old_cluster_names[i]
+  old_genes = old_markers[old_markers$cluster == old_cluster & old_markers$avg_log2FC > 0,]$gene
+  #convert  into a list with length=1
+  old_genes_list = list()
+  old_genes_list[[1]] = old_genes
+  sobject.sub.fib <- AddModuleScore(
+    sobject.sub.fib,
+    old_genes_list,
+    pool = NULL,
+    nbin = 24,
+    ctrl = 100,
+    name = paste0(cluster_name, "_score"),
+    seed = 1,
+    search = TRUE)
+    
+    feature_name = paste0(cluster_name, "_score1")
+    print(VlnPlot(sobject.sub.fib, feature_name))
+    PrintSeuratGraph(namecard = name,graphtype = "violin",feature = feature_name,group = "seurat_clusters")
+}
+```
+
+```{r}
+#Edit this part carefully. You can add any number of types. Each cluster can only be one type. 
+
+type0 = c(-1)
+name0 = "Altered-dural_immune"
+type1 = c(0)
+name1 = "Fib_1"
+type2 = c(1)
+name2 = "Myofibroblast"
+type3 = c(2)
+name3 = "Fib_2"
+type4 = c(3)
+name4 = "ex-Myofibroblast"
+type5 = c(4)
+name5 = "Arachnoid"
+type6 = c(5)
+name6 = "Pial"
+type7 = c(6)
+name7 = "Mural"
+type8 = c(7)
+name8 = "Prolif"
+type9 = c(8)
+name9 = "Dural/Osteo"
+
+
+#Initialize the cluster levels as a vector and replace the cluster levels with the appropriate name. 
+clusters = as.factor(sobject.sub.fib$seurat_clusters)
+type = levels(clusters)
+type[type0+2] = name0
+type[type1+2] = name1
+type[type2+2] = name2
+type[type3+2] = name3
+type[type4+2] = name4
+type[type5+2] = name5
+type[type6+2] = name6
+type[type7+2] = name7
+type[type8+2] = name8
+type[type9+2] = name9
+
+levels(clusters) = type
+
+#Add a metadata column
+sobject.sub.fib$fibtype = clusters
+
+#check the celltype assignment for accuracy
+table(sobject.sub.fib$fibtype,sobject.sub.fib$seurat_clusters)
+
+#add a metadata column labelling each cluster
+sobject.sub.fib$fibtypecluster = paste0(sobject.sub.fib$fibtype,"-",sobject.sub.fib$seurat_clusters)
+Idents(sobject.sub.fib) = "fibtype"
+```
+Save the clustered dataset with fibtype labels. Overwrite the existing, clustered dataset. 
+```{r,eval = FALSE}
+save(sobject.sub.fib,file = file.path(dir,datafolder,paste0(project,"_",iterationname,".RData")))
+```
+
+Save the tree
+```{r}
+# Idents(sobject.sub.fib) = column
+Idents(sobject.sub.fib) = "seurat_clusters"
+sobject.sub.fib= BuildClusterTree(sobject.sub.fib,dims = pcs)
+tree = sobject.sub.fib@tools$BuildClusterTree
+setEPS()
+postscript(file.path(dir,"Trees",paste0(project,"_",iterationname,"_tree.eps")))
+plot.phylo(tree, use.edge.length = T, direction = "rightwards")
+dev.off()
+```
+
+*Note: already scaled/normalized (before subsetting, in 2_Processing.Rmd)*
+
+*Heatmap*
+
+***NOTE - WITH DOUBLETS, MOVED TO "OLD WITH DOUBLETS FOLDER***
+
+First calculate DE genes for every cluster (with meninges)
+```{r,results = "hide",eval = FALSE}
+# Idents(sobject.sub.fib) = column
+# markers_all <- FindAllMarkers(
+#     object = sobject.sub.fib,
+#     assay = "RNA",  ##Edited to do DEG analysis on RNA counts, not SCT transformed data
+#     features = rownames(sobject.sub.fib),
+#     test.use = "MAST",
+#     only.pos = FALSE, 
+#     min.pct = 0.05, 
+#     logfc.threshold = 0.2
+# )
+
+#or
+
+markers_all <- RunPrestoAll(
+    object = sobject.sub.fib,
+    assay = "RNA",
+    features = rownames(sobject.sub.fib),
+    test.use = "wilcox",
+    only.pos = FALSE,
+    min.pct = 0.05,
+    logfc.threshold = 0.2)
+
+write.csv(markers_all,file = file.path(dir,"Spreadsheets",paste0(project, "_", iterationname, "_all_markers.csv")))
+```
+```{r}
+#Cluster 1: Nrxn1-3 (doublets)
+#Cluster 3: Myeloid (doublets)
+#(not doublets by DoubletFinder [see 5_DoubletFinder.Rmd], but express fibroblast and macrophage or neuron genes --> maybe safer to exclude))
+
+#Exclude unwanted clusters
+Idents(sobject.sub.fib) = "sub.cluster"
+
+clusters_minus_doublets = c(0, 2, 4:9)
+sobject.sub.fib.final = subset(sobject.sub.fib, idents = clusters_minus_doublets)
+sobject.sub.fib = sobject.sub.fib.final
+
+iterationname = "fib_final"
+save(sobject.sub.fib,file = file.path(dir,datafolder,paste0(project,"_",iterationname,"_v2.RData")))
+
+```
+
+***REDO ALL PLOTTING WITHOUT DOUBLETS***
+```{r}
+Plotfolder = "Plots/Fibroblast Subset"
+DefaultAssay(sobject.sub.fib) = "RNA"
+
+name = paste0(project,"_",iterationname)
+genes = c("Col1a2", "Cthrc1", "Fn1", "Cd80", "Cxcl12", "Ghr", "Lama1", "Ptgds", "Tmeff2", "Cspg4")
+groups = c("timepoint", "condition", "seurat_clusters", "fibtype", "fibtypecluster")
+#note - added "fibtype" and "fibtypecluster" from below
+genes = genes[genes %in% rownames(GetAssayData(sobject.sub.fib,slot = "data"))]
+
+for(feature in genes){
+  PrintSeuratGraph(namecard = name,graphtype = "feature",feature = feature)
+}
+
+#dim plots for clustering
+for(group in groups){
+  PrintSeuratGraph(namecard = name,graphtype = "dim",group = group, feature = group)
+  PrintSeuratGraph(namecard = paste0(name,"_labeled_"),graphtype = "dim",group = group, feature = group, label = TRUE)
+  PrintSeuratGraph(namecard = paste0(name, "_split_"), graphtype = "dim", feature = group, split=group)
+}
+
+#violin plots
+for(feature in c(genes)){
+  PrintSeuratGraph(namecard = name,graphtype = "violin",feature = feature,group = "seurat_clusters")
+}
+
+PrintSeuratGraph(namecard = paste0(name, "_timepoint-condition"), graphtype = "dim", group = "timepoint", split = "condition")
+PrintSeuratGraph(namecard = paste0(name, "_condition-timepoint"), graphtype = "dim", group = "condition", split = "timepoint")
+
+PrintSeuratGraph(namecard = paste0(name, "_fibtype-condition"), graphtype = "dim", group = "fibtype", split = "condition")
+
+Plotfolder = "Plots/Figure"
+setEPS()
+postscript(file.path(dir, Plotfolder, "fibtype_condition.eps"), width = 12)
+DimPlot(sobject.sub.fib, group.by = "fibtype", split.by = "condition", label=T) + NoLegend()
+dev.off()
+setEPS()
+postscript(file.path(dir, Plotfolder, "timepoint_condition.eps"), width = 12)
+DimPlot(sobject.sub.fib, group.by = "timepoint", split.by = "condition", label=F)
+dev.off()
+```
+```{r}
+Plotfolder = "Plots/Fibroblast Subset/Old Seq Mapping"
+  
+#Map old clusters (NEC127) onto new clusters (NEC190)
+old_markers_path = "/Users/nathanewing-crystal/Ari Molofsky Lab Dropbox/Ari Molofsky Lab Team Folder/Nathan Ewing-Crystal/RNASeq/Lesion snRNASeq/seurat/Spreadsheets/lesion_snRNASeq_fib_reclustered_all_markers.csv"
+old_markers = read.csv(old_markers_path,stringsAsFactors = F)
+
+old_clusters = levels(factor(old_markers$cluster))
+old_cluster_names = c("Meninges_1", "Lama1", "Tmeff2", "Meninges_2", "Ptgds", "Fn1", "Cd80", "Myeloid", "Meninges_3", "Ghr", "Nrxn1-3", "Mural_Pericyte", "Meninges_4", "Prolif", "Meninges_5")
+names(old_clusters) = old_cluster_names
+old_clusters = old_clusters[-c(8,11)]
+old_cluster_names = old_cluster_names[-c(8,11)]
+
+plots = list()
+
+for(i in 1:length(old_clusters)){
+  old_cluster = old_clusters[i]
+  cluster_name = old_cluster_names[i]
+  old_genes = old_markers[old_markers$cluster == old_cluster & old_markers$avg_log2FC > 0,]$gene
+  #convert  into a list with length=1
+  old_genes_list = list()
+  old_genes_list[[1]] = old_genes
+  sobject.sub.fib <- AddModuleScore(
+    sobject.sub.fib,
+    old_genes_list,
+    pool = NULL,
+    nbin = 24,
+    ctrl = 100,
+    name = paste0(cluster_name, "_score"),
+    seed = 1,
+    search = TRUE)
+    
+    feature_name = paste0(cluster_name, "_score1")
+    print(VlnPlot(sobject.sub.fib, feature_name))
+    #PrintSeuratGraph(namecard = name,graphtype = "violin",feature = feature_name,group = "seurat_clusters")
+}
+
+Plotfolder = "Plots/figure"
+p1 = VlnPlot(sobject.sub.fib, c("Prolif_score1", "Fn1_score1", "Ghr_score1", "Cd80_score1", "Lama1_score1", "Ptgds_score1", "Tmeff2_score1", "Mural_Pericyte_score1", "Meninges_1_score1", "Meninges_2_score1", "Meninges_3_score1",  "Meninges_4_score1", "Meninges_5_score1"), stack=T, group.by = "fibtype")
+p1$data$ident <- factor(x = p1$data$ident, levels = rev(c("Prolif", "Myofibroblast", "ex-Myofibroblast", "Pial", "Arachnoid", "Altered-dural_immune", "Mural", "Dural/Osteo")))
+
+p2 = DotPlot(sobject.sub.fib, assay = "RNA", group.by = "fibtype", features = c("Prolif_score1", "Fn1_score1", "Ghr_score1", "Cd80_score1", "Lama1_score1", "Ptgds_score1", "Tmeff2_score1", "Mural_Pericyte_score1", "Meninges_1_score1", "Meninges_2_score1", "Meninges_3_score1",  "Meninges_4_score1", "Meninges_5_score1"), cols = "RdBu", dot.min = 0.999) + theme(axis.text.x = element_text(angle = 90, hjust = 0.95))
+p2$data$id <- factor(x = p2$data$id, levels = rev(c("Prolif", "Myofibroblast", "ex-Myofibroblast", "Pial", "Arachnoid", "Altered-dural_immune", "Mural", "Dural/Osteo")))
+
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "fib_mapping_old.eps"), width = 10, height = 5)
+p2
+dev.off()
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "fib_mapping.eps"), width = 10, height = 5)
+p1
+dev.off()
+```
+
+
+First calculate DE genes for every cluster (with meninges)
+```{r,results = "hide",eval = FALSE}
+Idents(sobject.sub.fib) = "seurat_clusters"
+# Idents(sobject.sub.fib) = column
+# markers_all <- FindAllMarkers(
+#     object = sobject.sub.fib,
+#     assay = "RNA",  ##Edited to do DEG analysis on RNA counts, not SCT transformed data
+#     features = rownames(sobject.sub.fib),
+#     test.use = "MAST",
+#     only.pos = FALSE, 
+#     min.pct = 0.05, 
+#     logfc.threshold = 0.2
+# )
+
+#or
+
+markers_all <- RunPrestoAll(
+    object = sobject.sub.fib,
+    assay = "RNA",
+    features = rownames(sobject.sub.fib),
+    test.use = "wilcox",
+    only.pos = FALSE,
+    min.pct = 0.05,
+    logfc.threshold = 0.2)
+
+write.csv(markers_all,file = file.path(dir,"Spreadsheets",paste0(project, "_", iterationname, "_all_markers.csv")))
+```
+#NOTE - did this with doublets too, moved to new folder
+```{r}
+Idents(sobject.sub.fib) = "fibtype"
+#read in a de gene file
+
+markers = read.csv(file.path(dir,"Spreadsheets",paste0(project, "_", iterationname, "_all_markers.csv")),stringsAsFactors = F)
+
+#Select only the genes that pass thresholds
+markers = markers[markers$p_val_adj<pval,]
+
+#pick only positives, or restrict by min/max pct expression using pct1/2
+markers = markers[markers$avg_log2FC > lfc,] #make log2FC >0.2 for heatmaps, >0 for volcano plots
+markers = markers[markers$pct.1 > minpct & markers$pct.2 < maxpct,]
+
+#If you want, select markers that define a single cluster
+if (single){markers <- markers[markers$gene %in% names(table(markers$gene))[table(markers$gene) == 1],] }
+
+table(markers$cluster)
+
+topgenes <- markers %>% group_by(cluster) %>% top_n(10, avg_log2FC) #top 10 genes
+topgenes = topgenes[order(topgenes$cluster),]
+
+#Subset each cluster to ncells
+cellnames = sobject.sub.fib@meta.data[,column]
+names(cellnames) = colnames(sobject.sub.fib)
+clusters = levels(as.factor(cellnames))
+newcellnames = NULL
+for (cluster in clusters){
+  n = length(cellnames[cellnames == cluster])
+  if (n > ncells){n = ncells}
+  newcluster = sample(cellnames[cellnames == cluster],n, replace = F)
+  newcellnames = c(newcellnames,newcluster)
+}
+
+#check
+table(newcellnames)
+
+#Make heatmap
+setEPS()
+postscript(file.path(dir,"Heatmaps", paste0(project,"_",iterationname, "_", column,"_",pval,"_ncells",ncells,"heatmap.eps")))
+DoHeatmap(
+    object = sobject.sub.fib, 
+    features = c(topgenes$gene),
+    cells = names(newcellnames),
+    group.by = column,
+    size = 4,
+    label = T,
+    draw.lines = T,
+    raster = FALSE
+) + theme(axis.text.y = element_text(size = 4))
+
+dev.off()
+```
+
+Print heatmap to console
+
+```{r}
+DoHeatmap(
+    object = sobject.sub.fib, 
+    features = c(topgenes$gene),
+    cells = names(newcellnames),
+    group.by = column,
+    size = 5,
+    label = T,
+    draw.lines = T
+)
+```
+
+#NOTE - did this with doublets too, moved to new folder
+```{r}
+
+#dotplot for figure
+topgenes <- markers %>% group_by(cluster) %>% top_n(3, avg_log2FC) #top 10 genes
+
+column = "fibtype" #for name consistency
+topgenes$number = topgenes$cluster
+
+topgenes = topgenes[order(as.numeric(as.character(topgenes$number))),]
+
+setEPS()
+postscript(file.path(dir,"DotPlots", paste0(project,"_",iterationname, column,"_",pval,"_ncells",ncells,"dotplot.eps")), width = 12)
+DotPlot(sobject.sub.fib, assay = "RNA", features = unique(c(topgenes$gene)), cols = "RdBu") + theme(axis.text.x = element_text(angle = 90, hjust = 0.95))
+dev.off()
+```
+
+```{r}
+#add fibtype to total sobject
+load("/Users/nathanewing-crystal/Ari Molofsky Lab Dropbox/Ari Molofsky Lab Team Folder/Nathan Ewing-Crystal/RNASeq/Lesion snRNASeq 2 Tgfb/seurat/Data/Seurat/tgfb_lesion_snRNASeq_scaled_processed.RData")
+rm(sobject.sub.fib())
+load("/Users/nathanewing-crystal/Ari Molofsky Lab Dropbox/Ari Molofsky Lab Team Folder/Nathan Ewing-Crystal/RNASeq/Lesion snRNASeq 2 Tgfb/seurat/Data/Seurat/Fibroblast Subset/2 Reclustered/tgfb_lesion_snRNASeq_fib_reclustered.RData") #use old sobject.sub.fib ("reclustered"), then remove doublets
+
+celltype = as.character(sobject$celltype)
+names(celltype) = as.character(colnames(sobject))
+
+celltypecluster = as.character(sobject$celltypecluster)
+names(celltypecluster) = as.character(colnames(sobject))
+
+fibtype = as.character(sobject.sub.fib$fibtype)
+names(fibtype) = as.character(colnames(sobject.sub.fib))
+
+fibtypecluster = as.character(sobject.sub.fib$fibtypecluster)
+names(fibtypecluster) = as.character(colnames(sobject.sub.fib))
+
+for(cell in names(celltype)){
+  if(cell %in% names(fibtype)){
+      index_cell = which(names(celltype) == cell)
+      index_fib = which(names(fibtype) == cell)
+      celltype[index_cell] = paste0("Fibroblast_", fibtype[index_fib])
+      celltypecluster[index_cell] = paste0("Fibroblast_", fibtypecluster[index_fib])
+  }
+}
+
+sobject$fibtype = celltype
+sobject$fibtypecluster = celltypecluster
+
+Idents(sobject) = "fibtype"
+
+fibtype_keep = levels(sobject)
+fibtype_keep = fibtype_keep[!(fibtype_keep %in% c("Fibroblasts_Fib_1", "Fibroblasts_Fib_2"))]
+sobject = subset(sobject, idents = fibtype_keep)
+
+iterationname = "final_withfibtype"
+
+datafolder = "Data/Seurat"
+save(sobject,file = file.path(dir,datafolder,paste0(project,"_",iterationname,".RData")))
+
+rm(sobject.sub.fib) #so don't keep old fib object
+```
+
+***VOLCANO PLOTS***
+
+***~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~***
+TGFb: compare Col1a2 cKO or ADWA11 vs. WT fibroblasts for
+-all fibroblast clusters together
+-each fibroblast cluster individually
+***~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~***
+```{r}
+Plotfolder = "Plots/Fibroblast Subset/Volcano"
+groups = c("NULL", "0", "2", "4", "5", "6", "8", "9")
+clusters = levels(as.factor(sobject.sub.fib$fibtypecluster))
+#manual assignment
+group_names=c("all", clusters[1], clusters[6], clusters[4], clusters[2], clusters[7], clusters[5], clusters[8], clusters[3])
+Idents(sobject.sub.fib) = "seurat_clusters"
+
+#WT vs. cKO
+for(group in groups){
+  group_name = group_names[which(groups == group)]
+  print(paste0("Finding markers (WT vs. cKO) for: ", group_name))
+
+  markers = FindMarkers(
+    sobject.sub.fib,
+    group.by = "condition",
+    ident.1 = "cKO",
+    ident.2 = "WT",
+    subset.ident = if(group_name == "all"){NULL} else{group}) #either cluster of interest or all clusters together
+  
+  write.csv(markers,file = file.path(dir,"Spreadsheets/WT_vs_cKO",paste0(project, "_", iterationname, "_cluster-", group_name, "_wt-vs-col1a2-cKO_markers.csv")))
+
+  #volcano plot
+  
+  #Minimum fold change (i.e. 1.15 = 15% increase)
+  minfc = 1.15
+  #Max adj. p value
+  alpha = 0.05
+  #Genes to highlight
+  ngenes = 100
+  
+  defile = paste0(project, "_", iterationname, "_cluster-", group_name, "_wt-vs-col1a2-cKO_markers.csv")
+  
+  #Comparison being made (must match file names)
+  comparison = paste0(project, "_", iterationname, "_cluster-", group_name, "_wt-vs-col1a2-cKO_markers")
+
+  newlist=list(de)
+  de = read.csv(file.path(dir,"Spreadsheets/WT_vs_cKO", defile),stringsAsFactors = F) #any   spreadsheet with gene symbols or other identifiers
+  colnames(de)[1] = "Gene"
+
+  #NOTE: generated from "DEG_analysis" script
+  fc = de
+  fc = fc[!is.na(fc$avg_log2FC),]
+  colorkeysdown = fc$Gene[fc$avg_log2FC < -log2(minfc) & fc$p_val_adj < alpha]
+  colorkeysup = fc$Gene[fc$avg_log2FC > log2(minfc) & fc$p_val_adj < alpha]
+  
+  #Either highlight specific genes or pick the top genes in colorkeysup/down
+  top = fc[fc$p_val_adj<alpha,]
+  top = top[order(top$avg_log2FC),"Gene"]
+  highlight_top = c(head(top,ngenes),tail(top,ngenes))
+  highlight_fib = c("Col1a1", "Col1a2", "Col4a5", "Col4a6", "Col6a5", "Col6a6", "Col8a1", "Col8a2", "Col11a1", "Col11a2", "Col12a1", "Col16a1", "Col18a1", "Col19a1", "Col22a1", "Col23a1", "Col24a1", "Col25a1", "Col26a1", "Col27a1",  "Ghr", "Ptgds", "Lama1", "Il31", "Tnc", "Fbn2", "Fn1", "Cd80", "Cthrc1", "Lrrc15", "Pdgfa", "Lum", "Dcn", "Mki67")
+  highlight_fib = highlight_fib[highlight_fib %in% c(colorkeysup, colorkeysdown)]
+  highlight_immune = c("Ccl5", "Cxcl5", "Ccl7", "Cxcl9", "Ccl9", "C3", "H2-Eb1", "H2-Q7", "Saa3", "Ccl6", "Il31", "Cxcl1", "Ccl8", "Il7", "Ccl2", "Cxcl13", "Il6")
+  highlight_immune = highlight_immune[highlight_immune %in% c(colorkeysup, colorkeysdown)]
+  genelists = list(highlight_top, highlight_immune, highlight_fib)
+  names_genelists = c("top", "immune", "fibrosis")
+  size_labels = c(2,4, 4)
+
+  allcolors = rep("darkgrey",length(fc$Gene))
+  names(allcolors) = fc$Gene
+  allcolors[names(allcolors) %in% colorkeysdown] = "blue"
+  allcolors[names(allcolors) %in% colorkeysup]= "red"
+  # names(allcolors)[allcolors == "yellow"] = "labelled"
+  names(allcolors)[allcolors == "red"] = "Col1a2cre Tgfbr2flox"
+  names(allcolors)[allcolors == "darkgrey"] = "-"
+  names(allcolors)[allcolors == "blue"] = " WT" #space for alphabetizing
+    
+  #manual label
+  clustername = (if(group_name == "all"){} else{paste0("(cluster ", group_name, ") ")})
+  name = paste0("Fibroblasts ", clustername, "WT vs. Col1a2 cKO")
+  range = max(max(fc$avg_log2FC), min(fc$avg_log2FC))
+  if(is.infinite(range)){range = 150}
+
+  for(i in 1:length(names_genelists)){
+    setEPS()
+    postscript(file.path(dir, Plotfolder, "ctrl_vs_cKO", names_genelists[i], paste0("Volcano_",comparison,"_", names_genelists[i], ".eps")))
+    print(EnhancedVolcano(fc,
+                lab = fc$Gene,
+                x = 'avg_log2FC',
+                y = 'p_val_adj',
+                xlim = c(-range, range),
+                title = name,
+                drawConnectors = T,
+                arrowheads = F,
+                legendPosition = 'bottom',
+                pCutoff = alpha,
+                FCcutoff = log2(minfc),
+                selectLab = genelists[[i]],
+                labSize = size_labels[i],
+                pointSize = 0.5,
+                col=c('black', 'black', 'black', 'red3'),
+                colCustom = allcolors,
+                gridlines.major = F,
+                gridlines.minor = F,
+                colAlpha = 1,
+                max.overlaps = 500))
+     dev.off()
+  }
+}
+
+#Ctrl vs. ADWA11
+for(group in groups){
+  group_name = group_names[which(groups == group)]
+  print(paste0("Finding markers (ctrl vs. ADWA11) for: ", group_name))
+
+  markers = FindMarkers(
+    sobject.sub.fib,
+    group.by = "condition",
+    ident.1 = "ADWA11",
+    ident.2 = "WT",
+    subset.ident = if(group_name == "all"){NULL} else{group}) #either cluster of interest or all clusters together
+  
+  write.csv(markers,file = file.path(dir,"Spreadsheets/WT_vs_ADWA11",paste0(project, "_", iterationname, "_cluster-", group_name, "_ctrl-vs-adwa11_markers.csv")))
+
+  #volcano plot
+  
+  #Minimum fold change (i.e. 1.15 = 15% increase)
+  minfc = 1.15
+  #Max adj. p value
+  alpha = 0.05
+  #Genes to highlight
+  ngenes = 100
+  
+  defile = paste0(project, "_", iterationname, "_cluster-", group_name, "_ctrl-vs-adwa11_markers.csv")
+  
+  #Comparison being made (must match file names)
+  comparison = paste0(project, "_", iterationname, "_cluster-", group_name, "_ctrl-vs-adwa11_markers")
+
+  newlist=list(de)
+  de = read.csv(file.path(dir,"Spreadsheets/WT_vs_ADWA11", defile),stringsAsFactors = F) #any   spreadsheet with gene symbols or other identifiers
+  colnames(de)[1] = "Gene"
+
+  #NOTE: generated from "DEG_analysis" script
+  fc = de
+  fc = fc[!is.na(fc$avg_log2FC),]
+  colorkeysdown = fc$Gene[fc$avg_log2FC < -log2(minfc) & fc$p_val_adj < alpha]
+  colorkeysup = fc$Gene[fc$avg_log2FC > log2(minfc) & fc$p_val_adj < alpha]
+  
+  #Either highlight specific genes or pick the top genes in colorkeysup/down
+  top = fc[fc$p_val_adj<alpha,]
+  top = top[order(top$avg_log2FC),"Gene"]
+  highlight_top = c(head(top,ngenes),tail(top,ngenes))
+  highlight_fib = c("Col1a1", "Col1a2", "Col4a5", "Col4a6", "Col6a5", "Col6a6", "Col8a1", "Col8a2", "Col11a1", "Col11a2", "Col12a1", "Col16a1", "Col18a1", "Col19a1", "Col22a1", "Col23a1", "Col24a1", "Col25a1", "Col26a1", "Col27a1",  "Ghr", "Ptgds", "Lama1", "Il31", "Tnc", "Fbn2", "Fn1", "Cd80", "Cthrc1", "Lrrc15", "Pdgfa", "Lum", "Dcn", "Mki67")
+  highlight_fib = highlight_fib[highlight_fib %in% c(colorkeysup, colorkeysdown)]
+  highlight_immune = c("Ccl5", "Cxcl5", "Ccl7", "Cxcl9", "Ccl9", "C3", "H2-Eb1", "H2-Q7", "Saa3", "Ccl6", "Il31", "Cxcl1", "Ccl8", "Il7", "Ccl2", "Cxcl13", "Il6")
+  highlight_immune = highlight_immune[highlight_immune %in% c(colorkeysup, colorkeysdown)]
+  genelists = list(highlight_top, highlight_immune, highlight_fib)
+  names_genelists = c("top", "immune", "fibrosis")
+  size_labels = c(2,4, 4)
+
+  allcolors = rep("darkgrey",length(fc$Gene))
+  names(allcolors) = fc$Gene
+  allcolors[names(allcolors) %in% colorkeysdown] = "blue"
+  allcolors[names(allcolors) %in% colorkeysup]= "red"
+  # names(allcolors)[allcolors == "yellow"] = "labelled"
+  names(allcolors)[allcolors == "red"] = "ADWA11"
+  names(allcolors)[allcolors == "darkgrey"] = "-"
+  names(allcolors)[allcolors == "blue"] = " WT" #space for alphabetizing
+    
+  #manual label
+  clustername = (if(group_name == "all"){} else{paste0("(cluster ", group_name, ") ")})
+  name = paste0("Fibroblasts ", clustername, "Ctrl vs. ADWA11")
+  range = max(max(fc$avg_log2FC), min(fc$avg_log2FC))
+  if(is.infinite(range)){range = 150}
+
+  for(i in 1:length(names_genelists)){
+    setEPS()
+    postscript(file.path(dir, Plotfolder, "ctrl_vs_adwa11", names_genelists[i], paste0("Volcano_",comparison,"_", names_genelists[i], ".eps")))
+    print(EnhancedVolcano(fc,
+                lab = fc$Gene,
+                x = 'avg_log2FC',
+                y = 'p_val_adj',
+                xlim = c(-range, range),
+                title = name,
+                drawConnectors = T,
+                arrowheads = F,
+                legendPosition = 'bottom',
+                pCutoff = alpha,
+                FCcutoff = log2(minfc),
+                selectLab = genelists[[i]],
+                labSize = size_labels[i],
+                pointSize = 0.5,
+                col=c('black', 'black', 'black', 'red3'),
+                colCustom = allcolors,
+                gridlines.major = F,
+                gridlines.minor = F,
+                colAlpha = 1,
+                max.overlaps = 500))
+     dev.off()
+  }
+}
+
+```
+***GENE SET TESTING**
+https://sbc.shef.ac.uk/prostate-bioinformatics/rna-seq-gene-set-testing.nb.html
+
+```{r}
+#Note - "old" version performed with meningeal clusters, new version performed without
+
+Plotfolder = "Plots/Fibroblast Subset/GO"
+
+plots = list()
+names = list()
+i=1
+
+# create list of all genes
+all_genes = rownames(sobject.sub.fib)
+
+# create list of DE genes
+de_all = read.csv(file.path(dir,"Spreadsheets",paste0(project, "_", iterationname, "_all_markers.csv")),stringsAsFactors = F)
+  
+group_name = "all"
+
+defile = paste0(project, "_", iterationname, "_cluster-", group_name, "_wt-vs-col1a2-cKO_markers.csv")
+de_wtvscKO = read.csv(file.path(dir,"Spreadsheets/WT_vs_cKO", defile),stringsAsFactors = F) #any   spreadsheet with gene symbols or other identifiers
+decko = de_wtvscKO[de_wtvscKO$avg_log2FC>0,]
+dewt = de_wtvscKO[de_wtvscKO$avg_log2FC<0,]
+
+defile = paste0(project, "_", iterationname, "_cluster-", group_name, "_ctrl-vs-adwa11_markers.csv")
+de_ctrlvsadwa = read.csv(file.path(dir,"Spreadsheets/WT_vs_ADWA11", defile),stringsAsFactors = F) #any   spreadsheet with gene symbols or other identifiers
+deadwa = de_ctrlvsadwa[de_ctrlvsadwa$avg_log2FC>0,]
+dectrl = de_ctrlvsadwa[de_ctrlvsadwa$avg_log2FC<0,]
+
+group_name = "Myofibroblast-2"
+
+defile = paste0(project, "_", iterationname, "_cluster-", group_name, "_wt-vs-col1a2-cKO_markers.csv")
+de_wtvscKO = read.csv(file.path(dir,"Spreadsheets/WT_vs_cKO", defile),stringsAsFactors = F) #any   spreadsheet with gene symbols or other identifiers
+deckofn1 = de_wtvscKO[de_wtvscKO$avg_log2FC>0,]
+dewtfn1 = de_wtvscKO[de_wtvscKO$avg_log2FC<0,]
+
+defile = paste0(project, "_", iterationname, "_cluster-", group_name, "_ctrl-vs-adwa11_markers.csv")
+de_ctrlvsadwa = read.csv(file.path(dir,"Spreadsheets/WT_vs_ADWA11", defile),stringsAsFactors = F) #any   spreadsheet with gene symbols or other identifiers
+deadwafn1 = de_ctrlvsadwa[de_ctrlvsadwa$avg_log2FC>0,]
+dectrlfn1 = de_ctrlvsadwa[de_ctrlvsadwa$avg_log2FC<0,]
+
+comparison_delist = list(decko, dewt, dectrl, deadwa, deckofn1, dewtfn1, dectrlfn1, deadwafn1)
+
+clusters_named = c("cKO", "WT", "Ctrl", "ADWA11", "cKO_Fn1", "WT_Fn1", "Ctrl_Fn1", "ADWA11_Fn1")
+
+for(cluster in clusters_named){
+
+  #numeric cluster num (no name) for finding in defile
+  cluster_find = clusters[which(clusters_named == cluster)]
+  
+  print(paste0("Iteration: ", cluster))
+
+    name = paste0(project, iterationname, "_", cluster)
+    graphname = cluster
+    
+    de = comparison_delist[[which(clusters_named == cluster)]]     # get index of delist in "comparison_delist" by subtracting numeric clusters to get remaining 4
+  sig_de_genes = de[(de$p_val_adj < 0.05),][,1]
+  
+  #enrichGO
+  
+  enrich_go <- enrichGO(
+    gene= sig_de_genes,
+    OrgDb = org.Mm.eg.db,
+    keyType = "SYMBOL",
+    ont = c("ALL"),
+    universe = all_genes,
+    qvalueCutoff = 0.05,
+    readable=TRUE
+  )
+  
+  empty = FALSE
+  num_enriched = length(enrich_go@result$ID)
+  if(num_enriched == 0){
+    empty = TRUE
+    print(paste0(cluster, " is empty"))
+    p1 = p2 = p3 = "No terms enriched"
+  } else print(paste0(cluster, " enriched: ", num_enriched))
+  
+  if(empty == FALSE){p1 = dotplot(enrich_go, showCategory = 20, font.size = 8) + ggtitle(graphname) + theme(plot.title = element_text(hjust = 0.5)) + scale_fill_gradient(low = "red", high = "blue")}
+
+  name1 = paste0(name, "_GO_enrich_dotplot.eps")
+  plots[[i]] = p1
+  names[[i]] = name1
+  i = i+1
+
+  if(empty == FALSE){p2 = barplot(enrich_go, showCategory = 20, font.size = 8) + ggtitle(graphname) + theme(plot.title = element_text(hjust = 0.5))}
+  name2 = paste0(name, "_GO_enrich_barplot.eps")
+  plots[[i]] = p2
+  names[[i]] = name2
+  i = i+1
+  
+  if(empty == FALSE){p3 = dotplot(enrich_go, split="ONTOLOGY", font.size = 8) + facet_grid(ONTOLOGY~., scale="free")  + ggtitle(graphname) + theme(plot.title = element_text(hjust = 0.5))}
+  name3 = paste0(name, "_GO_enrich_dotplot_split.eps")
+  plots[[i]] = p3
+  names[[i]] = name3
+  i = i+1
+  
+  print(paste0("Success: ", cluster, "       i: ", i))
+}
+
+for(i in 1:length(plots)){
+  plot = plots[[i]]
+  name = names[[i]]
+
+  setEPS()
+  postscript(file.path(dir,Plotfolder,name), width = 6, height = 8)
+  print(plot + theme(axis.text.y = element_text(size = 12)))
+  dev.off()
+}
+```
+
+```{r}
+Plotfolder = "Plots/figure"
+markers = c("Col1a1", "Col1a2", "Col8a1", "Col11a1", "Col12a1", "Col16a1", "Col25a1", "Col27a1", "Fn1", "Lrrc15", "Tnc", "Lum", "Col6a5", "Col4a5", "Col19a1", "Col23a1", "Col26a1", "Col18a1", "Col22a1","Col24a1", "Cthrc1",  "Mki67")
+markers_short = c("Col1a1", "Col1a2", "Col8a1", "Col11a1", "Col12a1", "Col16a1", "Fn1", "Lrrc15", "Tnc", "Lum", "Col19a1", "Col23a1", "Col18a1", "Col22a1", "Cthrc1",  "Mki67")
+
+markers_short_myo = c("Col1a1", "Col1a2", "Col8a1", "Col11a1", "Col12a1", "Col16a1", "Col22a1", "Fn1", "Lrrc15", "Tnc")
+
+
+Idents(sobject.sub.fib) = "condition"
+condition = levels(as.factor(sobject.sub.fib$condition))
+#Arrange
+condition_new = c("WT", "cKO", "ADWA11")
+
+avgexp <- AverageExpression(sobject.sub.fib, return.seurat = TRUE, verbose = TRUE) 
+levels(avgexp) = condition_new
+
+setEPS()
+postscript(file.path(dir,Plotfolder, "fib-heatmap.eps"))
+DoHeatmap(
+    object = avgexp, 
+    features = markers,
+    size = 5,
+    label = T,
+    raster = F,
+    draw.lines = F) + scale_fill_gradientn(colors = rev(RColorBrewer::brewer.pal(n =4, name = "RdBu"))) + theme(axis.text.y = element_text(size = 6))
+dev.off()
+
+setEPS()
+postscript(file.path(dir,Plotfolder, "fib-heatmap_short.eps"), width = 4)
+DoHeatmap(
+    object = avgexp, 
+    features = markers_short,
+    size = 5,
+    label = T,
+    raster = F,
+    draw.lines = F) + scale_fill_gradientn(colors = rev(RColorBrewer::brewer.pal(n =4, name = "RdBu"))) + theme(axis.text.y = element_text(size = 16))
+dev.off()
+
+Idents(sobject.sub.fib) = "fibtype"
+myo = subset(sobject.sub.fib, ident = "Myofibroblast")
+Idents(myo) = "condition"
+avgexp <- AverageExpression(myo, return.seurat = TRUE, verbose = TRUE) #myo or sobject.sub.fib
+levels(avgexp) = condition_new
+
+setEPS()
+postscript(file.path(dir,Plotfolder, "fib-heatmap_short_myo.eps"), width = 4)
+DoHeatmap(
+    object = avgexp, 
+    features = markers_short_myo,
+    size = 5,
+    label = T,
+    raster = F,
+    draw.lines = F) + scale_fill_gradientn(colors = rev(RColorBrewer::brewer.pal(n =4, name = "RdBu"))) + theme(axis.text.y = element_text(size = 16))
+dev.off()
+```
+
+```{r}
+plots = list()
+names = list()
+
+#compare myofibroblasts and ex-myofibroblasts
+de = FindMarkers(
+    sobject.sub.fib,
+    group.by = "fibtype",
+    ident.1 = "Myofibroblast",
+    ident.2 = "ex-Myofibroblast")
+
+de_myo = de[de$avg_log2FC>0,]
+de_ex = de[de$avg_log2FC<0,]
+
+comparison_delist = list(de_myo, de_ex)
+
+clusters_named = c("Myofibroblasts", "ex-Myofibroblasts")
+
+for(cluster in clusters_named){
+
+  #numeric cluster num (no name) for finding in defile
+  cluster_find = clusters[which(clusters_named == cluster)]
+  
+  print(paste0("Iteration: ", cluster))
+
+    name = paste0(project, iterationname, "_", cluster)
+    graphname = cluster
+    
+    de = comparison_delist[[which(clusters_named == cluster)]]     # get index of delist in "comparison_delist" by subtracting numeric clusters to get remaining 4
+  sig_de_genes = rownames(de[(de$p_val_adj < 0.05),])
+  
+  #enrichGO
+  
+  enrich_go <- enrichGO(
+    gene= sig_de_genes,
+    OrgDb = org.Mm.eg.db,
+    keyType = "SYMBOL",
+    ont = c("ALL"),
+    universe = all_genes,
+    qvalueCutoff = 0.05,
+    readable=TRUE
+  )
+  
+  empty = FALSE
+  num_enriched = length(enrich_go@result$ID)
+  if(num_enriched == 0){
+    empty = TRUE
+    print(paste0(cluster, " is empty"))
+    p1 = p2 = p3 = "No terms enriched"
+  } else print(paste0(cluster, " enriched: ", num_enriched))
+  
+  if(empty == FALSE){p1 = dotplot(enrich_go, showCategory = 20, font.size = 8) + ggtitle(graphname) + theme(plot.title = element_text(hjust = 0.5))}
+
+  name1 = paste0(name, "_GO_enrich_dotplot.eps")
+  plots[[i]] = p1
+  names[[i]] = name1
+  i = i+1
+  
+  print(paste0("Success: ", cluster, "       i: ", i))
+}
+
+for(i in 1:length(plots)){
+  plot = plots[[i]]
+  name = names[[i]]
+  print(plot)
+#  setEPS()
+#  postscript(file.path(dir,Plotfolder,name), width = 6, height = 8)
+#  print(plot + theme(axis.text.y = element_text(size = 12)))
+#  dev.off()
+}
+```
+```{r}
+markers_short = c("Col1a1", "Col1a2", "Col8a1", "Col11a1", "Col12a1", "Col16a1", "Col19a1", "Col22a1", "Col23a1", "Col18a1", "Fn1", "Lrrc15", "Tnc", "Lum", "Cthrc1",  "Mki67")
+
+Idents(sobject.sub.fib) = "fibtype"
+compare = subset(sobject.sub.fib, subset = fibtype %in% c("Myofibroblast", "ex-Myofibroblast"))
+
+avgexp <- AverageExpression(compare, return.seurat = TRUE, verbose = TRUE)
+
+DoHeatmap(
+    object = avgexp, 
+    features = markers_short,
+    size = 5,
+    label = T,
+    raster = F,
+    draw.lines = F) + scale_fill_gradientn(colors = rev(RColorBrewer::brewer.pal(n =4, name = "RdBu"))) + theme(axis.text.y = element_text(size = 6))
+```
+```{r}
+#subcluster Cd80
+Idents(sobject.sub.fib) = "fibtype"
+sobject.sub.fib<- FindSubCluster(
+  sobject.sub.fib,
+  cluster = "Altered-dural_immune",
+  graph.name = "SCT_snn",
+  subcluster.name = "sub.cluster",
+  resolution = 0.15,
+  algorithm = 1
+)
+
+sub = subset(sobject.sub.fib, ident = "Altered-dural_immune")
+Idents(sub) = "sub.cluster"
+
+Plotfolder = "Plots/Fibroblast Subset/Cd80 subcluster"
+p1 = DimPlot(sub, group.by = "sub.cluster")
+p2 = DimPlot(sub, split.by = "condition")
+p3 = plot_density(sub, c("Alpl", "Foxc2"), joint=T)
+p4 = VlnPlot(sub, c("Alpl", "Foxc2", "Tmeff2"), stack=T)
+p5 = VlnPlot(sub, "Tmeff2_score1")
+p6 = VlnPlot(sub, "Cd80_score1")
+p7 = VlnPlot(sub, c("Cd80_score1", "Tmeff2_score1"), stack=T)
+
+
+setEPS()
+postscript(file.path(dir,Plotfolder,"dim.eps"), width = 8)
+print(p1)
+dev.off()
+
+setEPS()
+postscript(file.path(dir,Plotfolder,"dim_split.eps"), width = 15)
+print(p2)
+dev.off()
+
+setEPS()
+postscript(file.path(dir,Plotfolder,"dural_genes.eps"), width = 18)
+print(p3)
+dev.off()
+
+setEPS()
+postscript(file.path(dir,Plotfolder,"dural_genes_extra.eps"), width = 18)
+print(p4)
+dev.off()
+
+setEPS()
+postscript(file.path(dir,Plotfolder,"tmeff2_score.eps"))
+print(p5)
+dev.off()
+
+setEPS()
+postscript(file.path(dir,Plotfolder,"cd80_score.eps"))
+print(p6)
+dev.off()
+
+setEPS()
+postscript(file.path(dir,Plotfolder,"cd80_tmeff2_score.eps"), width = 6.5)
+print(p7)
+dev.off()
+```
+
+```{r}
+#add sub.cluster to total sobject
+#load(file.choose) #load total sobject
+
+celltype = as.character(sobject$celltype)
+names(celltype) = as.character(colnames(sobject))
+
+celltypecluster = as.character(sobject$celltypecluster)
+names(celltypecluster) = as.character(colnames(sobject))
+
+sub.cluster = as.character(sobject.sub.fib$sub.cluster)
+names(sub.cluster) = as.character(colnames(sobject.sub.fib))
+
+for(cell in names(celltype)){
+  if(cell %in% names(sub.cluster)){
+      index_cell = which(names(celltype) == cell)
+      index_sub = which(names(sub.cluster) == cell)
+      celltype[index_cell] = paste0("Sub_", sub.cluster[index_sub])
+  }
+}
+
+sobject$sub.cluster = celltype
+
+Idents(sobject) = "sub.cluster"

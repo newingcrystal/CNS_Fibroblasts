@@ -1,0 +1,202 @@
+---
+title: "Pseudotime"
+author: "Nathan Ewing-Crystal"
+date: "2023-05-17"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(Seurat)
+
+#if (!requireNamespace("BiocManager", quietly = TRUE))
+#install.packages("BiocManager")
+#BiocManager::install(version = "3.16")
+
+#BiocManager::install(c('BiocGenerics', 'DelayedArray', 'DelayedMatrixStats',
+#                       'limma', 'lme4', 'S4Vectors', 'SingleCellExperiment',
+#                       'SummarizedExperiment', 'batchelor', 'HDF5Array',
+#                       'terra', 'ggrastr'))
+#install.packages("devtools")
+#devtools::install_github('cole-trapnell-lab/monocle3')
+library(monocle3)
+
+#install.packages("R.utils")
+#remotes::install_github("satijalab/seurat-wrappers")
+library(SeuratWrappers)
+
+library(ggplot2)
+library(patchwork)
+library(magrittr)
+install.packages("tidyverse")
+library(tidyverse)
+library(dplyr)
+install.packages('s2')
+library(s2)
+```
+
+```{r}
+#Load filtered seurat object (note - using sobject.sub.fib)
+load(file.choose())
+```
+
+```{r}
+#Specify your preferred directory for all input + output
+dir = "/Users/nathanewing-crystal/Ari Molofsky Lab Dropbox/Ari Molofsky Lab Team Folder/Nathan Ewing-Crystal/RNASeq/Lesion snRNASeq 2 Tgfb/seurat"
+#Specify exactly where your seurat files live
+datafolder = "Data/Seurat/Fibroblast Subset"
+
+project<-"tgfb_lesion_snRNASeq"  
+
+#set up folders
+Plotfolder = "Plots/Fibroblast Subset"
+
+#make a unique name; maybe this is the celltype you've already subset, or the age you're looking at, etc.
+iterationname = "fib_final"
+```
+
+```{r}
+#Perform pseudotime analysis on lesion only (becomes complicated with meninges to choose "starting" node)
+monocle_object <- as.cell_data_set(sobject.sub.fib)
+monocle_object <- cluster_cells(cds = monocle_object)
+p1 <- plot_cells(monocle_object, show_trajectory_graph = FALSE)
+p2 <- plot_cells(monocle_object, color_cells_by = "partition", show_trajectory_graph = FALSE)
+wrap_plots(p1, p2)
+
+monocle_object <- learn_graph(monocle_object, use_partition = TRUE)
+
+#choose max Pi16 as root
+#max.pi16 <- which.max(unlist(FetchData(sobject.sub.fib.v3, "Pi16")))
+#max.pi16 <- colnames(sobject.sub.fib.v3)[max.pi16]
+
+#monocle_object <- order_cells(monocle_object,reduction_method = "UMAP", root_cells = max.pi16)
+
+#choose myofibroblasts as root
+monocle_object <- order_cells(monocle_object,reduction_method = "UMAP")
+
+
+Plotfolder = "Plots/Fibroblast Subset/Pseudotime"
+name = paste0(project, "_", iterationname)
+
+setEPS()
+postscript(file.path(dir, Plotfolder, paste0(name, "_realtime.eps")))
+DimPlot(sobject.sub.fib, group.by = "timepoint")
+dev.off()
+
+setEPS()
+postscript(file.path(dir, Plotfolder, paste0(name, "_pseudotime.eps")))
+plot_cells(monocle_object,
+       color_cells_by = "pseudotime",
+       graph_label_size=5,
+       show_trajectory_graph = FALSE,
+       label_leaves = FALSE, label_roots = FALSE, label_branch_points = FALSE)
+dev.off()
+
+setEPS()
+postscript(file.path(dir, Plotfolder, paste0(name, "_pseudotime_trajectory.eps")))
+plot_cells(monocle_object,
+       color_cells_by = "pseudotime",
+       graph_label_size=5,
+       show_trajectory_graph = TRUE,
+       label_leaves = FALSE, label_roots = FALSE, label_branch_points = FALSE)
+dev.off()
+
+setEPS()
+postscript(file.path(dir, Plotfolder, paste0(name, "_pseudotime_trajectory_labeled.eps")))
+plot_cells(monocle_object,
+       color_cells_by = "pseudotime",
+       graph_label_size=5,
+       show_trajectory_graph = TRUE)
+dev.off()
+
+setEPS()
+postscript(file.path(dir, Plotfolder, paste0(name, "_pseudotime_trajectory_condition.eps")))
+plot_cells(monocle_object,
+       color_cells_by = "condition",
+       graph_label_size=5,
+       show_trajectory_graph = TRUE,
+       label_leaves = FALSE, label_roots = FALSE, label_branch_points = FALSE)
+dev.off()
+```
+
+```{r}
+#Specify your preferred directory for all input + output
+dir = "/Users/nathanewing-crystal/Ari Molofsky Lab Dropbox/Ari Molofsky Lab Team Folder/Nathan Ewing-Crystal/RNASeq/Lesion snRNASeq 2 Tgfb/seurat"
+#Specify exactly where your seurat files live
+datafolder = "Data/Seurat/Myeloid Subset"
+
+project<-"tgfb_lesion_snRNASeq"  
+
+#set up folders
+Plotfolder = "Plots/Myeloid Subset"
+
+#make a unique name; maybe this is the celltype you've already subset, or the age you're looking at, etc.
+iterationname = "myeloid_reclustered"
+```
+
+```{r}
+#Perform pseudotime analysis on lesion only (becomes complicated with meninges to choose "starting" node)
+monocle_object <- as.cell_data_set(sobject.sub.myeloid)
+monocle_object <- cluster_cells(cds = monocle_object)
+p1 <- plot_cells(monocle_object, show_trajectory_graph = FALSE)
+p2 <- plot_cells(monocle_object, color_cells_by = "partition", show_trajectory_graph = FALSE)
+wrap_plots(p1, p2)
+
+monocle_object <- learn_graph(monocle_object, use_partition = TRUE)
+
+
+#choose root - microglia AND monocytes/DCs
+monocle_object <- order_cells(monocle_object,reduction_method = "UMAP")
+
+
+Plotfolder = "Plots/Myeloid Subset/Pseudotime"
+name = paste0(project, "_", iterationname)
+
+setEPS()
+postscript(file.path(dir, Plotfolder, paste0(name, "_realtime.eps")))
+DimPlot(sobject.sub.myeloid, group.by = "timepoint")
+dev.off()
+
+setEPS()
+postscript(file.path(dir, Plotfolder, paste0(name, "_pseudotime.eps")))
+plot_cells(monocle_object,
+       color_cells_by = "pseudotime",
+       graph_label_size=5,
+       show_trajectory_graph = FALSE,
+       label_leaves = FALSE, label_roots = FALSE, label_branch_points = FALSE)
+dev.off()
+
+setEPS()
+postscript(file.path(dir, Plotfolder, paste0(name, "_pseudotime_trajectory.eps")))
+plot_cells(monocle_object,
+       color_cells_by = "pseudotime",
+       graph_label_size=5,
+       show_trajectory_graph = TRUE,
+       label_leaves = FALSE, label_roots = FALSE, label_branch_points = FALSE)
+dev.off()
+
+setEPS()
+postscript(file.path(dir, Plotfolder, paste0(name, "_pseudotime_trajectory_labeled.eps")))
+plot_cells(monocle_object,
+       color_cells_by = "pseudotime",
+       graph_label_size=5,
+       show_trajectory_graph = TRUE)
+dev.off()
+
+setEPS()
+postscript(file.path(dir, Plotfolder, paste0(name, "_pseudotime_trajectory_condition.eps")))
+plot_cells(monocle_object,
+       color_cells_by = "condition",
+       graph_label_size=5,
+       show_trajectory_graph = TRUE,
+       label_leaves = FALSE, label_roots = FALSE, label_branch_points = FALSE)
+dev.off()
+
+sobject.sub.myeloid = AddMetaData(sobject.sub.myeloid,metadata=monocle_object@principal_graph_aux@listData$UMAP$pseudotime, col.name = "monocle3_pseudotime")
+
+FeaturePlot(sobject.sub.myeloid, "monocle3_pseudotime") + scale_color_viridis()
+```
+
