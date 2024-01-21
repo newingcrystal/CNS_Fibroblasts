@@ -401,7 +401,7 @@ for(subcluster in subclusters){
 }
 ```
 
-***COMPARE FIBROBLASTS 7 vs. 21dpi***
+***COMPARE FIBROBLASTS 7 vs. 21dpi (without deleter)***
 
 #Get subset markers for 21dpi vs. 7dpi fibroblasts
 ```{r}
@@ -410,14 +410,15 @@ for(subcluster in subclusters){
 DefaultAssay(vobj.merge.sub10) <- "Spatial"
 vobj.merge.sub10 <- NormalizeData(vobj.merge.sub10)
 vobj.merge.sub10 <- ScaleData(vobj.merge.sub10)
-
-vobj.merge.sub10 <- SetIdent(vobj.merge.sub10, value = vobj.merge.sub10@meta.data$sub.cluster)
+Idents(vobj.merge.sub10) = "orig.ident"
+sub = subset(vobj.merge.sub10, ident = c("Rest, 2dpi", "7dpi", "21dpi"))
+sub <- SetIdent(sub, value = sub@meta.data$sub.cluster)
 cluster1 = "8"
 cluster2 = "10_0"
 
 #Find markers based on scaled Spatial assay
 markers_7vs21_fib = FindMarkers(
-  object = vobj.merge.sub10,
+  object = sub,
   assay = "Spatial",
   ident.1 = cluster1,
   ident.2 = cluster2,
@@ -426,7 +427,7 @@ markers_7vs21_fib = FindMarkers(
   min.pct = 0.05,
   logfc.threshold = 0.2)
 
-write.csv(markers_7vs21_fib, paste0(dir, "/Tables/markers_7-vs-21-fib.csv"))
+write.csv(markers_7vs21_fib, paste0(dir, "/Tables/markers_7-vs-21-fib_WTONLY_seurat4.2.1.csv"))
 ```
 *Volcano Plot*
 7 vs. 21dpi
@@ -440,7 +441,7 @@ alpha = 0.05
 #Genes to highlight
 ngenes = 50
 
-defile = "markers_7-vs-21-fib.csv"
+defile = "markers_7-vs-21-fib_WTONLY_seurat4.2.1.csv"
 
 #Comparison being made (must match file names)
 comparison = "markers_7-vs-21-fib"
@@ -460,7 +461,7 @@ top = fc[fc$p_val_adj<alpha,]
 top = top[order(top$avg_log2FC),"Gene"]
 highlight_top = c(head(top,ngenes),tail(top,ngenes))
 highlight_immune = c("Cxcl12",  "Ccl3", "Ccl2", "Ccl4", "Ifit3", "Itgam", "C3", "Ptgds", "Il1rn", "Irf7", "Ifitm2", "Ifit3b", "Ifit1", "Ifitm3", "Ifit2","Ccl12", "Ccl9", "Ccl7", "Csf1", "H2-Aa", "Spp1")
-highlight_fib = c("Mki67", "Cthrc1", "Lrrc15", "Acta2", "Dcn",  "Col1a2", "Lum", "Itgav", "Col6a1", "Col1a1", "Col8a1")
+highlight_fib = c("Mki67", "Cthrc1", "Lrrc15", "Acta2", "Dcn",  "Col1a2", "Lum", "Itgav", "Col6a1", "Col1a1", "Col8a1", "Postn", "Fbn2")
 genelists = list(highlight_immune, highlight_fib, highlight_top)
 names_genelists = c("immune", "fibrosis", "top")
 size_labels = c(4, 4, 2)
@@ -482,7 +483,7 @@ if(is.infinite(range)){range = 150}
 
 for(i in 1:length(names_genelists)){
   setEPS()
-  postscript(file.path(dir,"Plots/fibroblast_parsing",paste0("Volcano_",comparison,"_", names_genelists[i], ".eps")))
+  postscript(file.path(dir,"Plots/fibroblast_parsing/WT/v4.2.1",paste0("Volcano_",comparison,"_", names_genelists[i], ".eps")))
   print(EnhancedVolcano(fc,
               lab = fc$Gene,
               x = 'avg_log2FC',
@@ -506,7 +507,7 @@ for(i in 1:length(names_genelists)){
   dev.off()
   
   setEPS()
-  postscript(file.path(dir,"Plots/fibroblast_parsing",paste0("Volcano_",comparison,"_", names_genelists[i], "_large-text.eps")))
+  postscript(file.path(dir,"Plots/fibroblast_parsing/WT/v4.2.1",paste0("Volcano_",comparison,"_", names_genelists[i], "_large-text.eps")))
   print(EnhancedVolcano(fc,
               lab = fc$Gene,
               x = 'avg_log2FC',
@@ -539,7 +540,7 @@ range_min = min(fc$avg_log2FC)
 range_max = max(fc$avg_log2FC)
 
 setEPS()
-postscript(file.path(dir,"Plots/fibroblast_parsing",paste0("Volcano_",comparison,"_", names_genelists[i], "_large-text_FINAL.eps")))
+postscript(file.path(dir,"Plots/fibroblast_parsing/WT/v4.2.1",paste0("Volcano_",comparison,"_", names_genelists[i], "_large-text_FINAL.eps")))
 print(EnhancedVolcano(fc,
               lab = NA,
               x = 'avg_log2FC',
@@ -625,10 +626,10 @@ dev.off()
 
 ```
 
-***ADD MODULE SCORE***
+***ADD MODULE SCORE - WT only***
 ```{r}
 
-Plotfolder = "Plots/module_score"
+Plotfolder = "Plots/module_score/WT"
 # proliferation signature from https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2819333/#!po=73.5294
 #additions from https://www.nature.com/articles/nrc1802#:~:text=The%20proliferation%20signature%20is%20now,and%20cyclin%20B1%2C%20respectively).
 features_prolif = list(c("Ccnb1", "Ccne1", "Ccnd1", "E2f1", "Tfdp1", "Cdkn2b", "Cdkn1a", "Plk4", "Wee1", "Aurkb", "Bub1", "Chek1", "Prim1", "Top2a", "Cks1", "Rad51l1", "Shc", "Racgap1", "Cbx1", "Mki67", "Mybl2", "Bub1", "Plk1"))
@@ -638,8 +639,8 @@ features_tgfb = read.csv(file.path(dir,"Data/Other/tgfb-vs-pbs.csv"),stringsAsFa
 
 #ADD MODULE SCORES
 
-vobj.merge.sub10 <- AddModuleScore(
-  vobj.merge.sub10,
+sub <- AddModuleScore(
+  sub,
   features_prolif,
   pool = NULL,
   nbin = 24,
@@ -650,8 +651,8 @@ vobj.merge.sub10 <- AddModuleScore(
 )
 #note - added as "proliferation_score1"
 
-vobj.merge.sub10 <- AddModuleScore(
-  vobj.merge.sub10,
+sub <- AddModuleScore(
+  sub,
   features_tgfb,
   pool = NULL,
   nbin = 24,
@@ -663,21 +664,21 @@ vobj.merge.sub10 <- AddModuleScore(
 #note - added as "tgfb_score1"
 
 #PREPARE TO GRAPH
-Idents(vobj.merge.sub10) = "fib.timepoint"
+Idents(sub) = "fib.timepoint"
 my_levels <- c("7dpi", "21dpi")
 my_levels = c("3", "6", "12", "21", "11", "20", "0", "17", "16", "9", "19", "5", "2", "4", "10_1", "22", "10_4", "1", "18", "7dpi", "21dpi", "14", "13", "23", "15", "10_2", "10_3", "7")
-levels(vobj.merge.sub10) = my_levels
+levels(sub) = my_levels
 
 #------------PROLIF----------
 
 setEPS()
 postscript(file.path(dir, Plotfolder, "prolif.eps"), width = 3.5, height = 4)
-VlnPlot(vobj.merge.sub10, idents = c("7dpi", "21dpi"), "proliferation_score1")
+VlnPlot(sub, idents = c("7dpi", "21dpi"), "proliferation_score1")
 dev.off()
 
 setEPS()
 postscript(file.path(dir, Plotfolder, "spatial_prolif.eps"))
-SpatialFeaturePlot(vobj.merge.sub10, "proliferation_score1", images = c(image1, image2, image3))
+SpatialFeaturePlot(sub, "proliferation_score1", images = c(image1, image2, image3))
 dev.off()
 
 #EQUALIZE SCALE BETWEEN 3 SECTIONS
