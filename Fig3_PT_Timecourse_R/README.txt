@@ -8,6 +8,15 @@ Fibroblast cluster correspondence (code uses working names based on representati
 	Ptgds = Arachnoid
 	Tmeff2 = altered dural
 
+Myeloid cell cluster correspondence (code uses working names based on representative DEG):
+	*working name* = *figure name*
+	Macrophage_ECM = ECM_Mac
+	Macrophage_CD206 = PVM/BAM
+	Macrophage_Ldlrad3 = SAM
+	DAM = DAM
+	Microglia = Microglia
+	Monocyte_DC = Mono/DC
+
 ---------------------------------------------------------------------------------------------
 
 .Rmd files contain references to Seurat objects by number and iteration name, referring to various stages of analysis, described below. When not explicitly referenced, Seurat object used corresponds to most recently created or loaded Seurat object.
