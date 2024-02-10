@@ -470,9 +470,15 @@ for(condition in levels(as.factor(sobject$timepoint_genotype))){
 }
 
 #override "timepoint_dimlesion" with new colors
-p1 = DimPlot(sobject, group.by = "timepoint", cols = c("#F8766D", "#DFAF37", "#00BFC4", "#C77CFF"))
+p1 = DimPlot(sobject, group.by = "timepoint", cols = c("#F8766D", "#DFAF37", "#00BFC4", "#C77CFF")) + NoLegend()
 setEPS()
 postscript(file.path(dir, Plotfolder, paste0("timepoint_dim", project, "_", iterationname, ".eps")))
+p1
+dev.off()
+
+#override "microanatomy_dimlesion" with no label
+p1 = DimPlot(sobject, group.by = "microanatomy") + NoLegend()
+postscript(file.path(dir, Plotfolder, paste0("microanatomy_dim", project, "_", iterationname, ".eps")))
 p1
 dev.off()
 ```
