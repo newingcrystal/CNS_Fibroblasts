@@ -748,3 +748,20 @@ for(i in 1:length(gene_lists)){
 }
 ```
 
+```{r}
+#parse Ghr fibroblasts
+
+Idents(sobject.sub.fib.wt) = "fibtype"
+fibtypecluster = levels(sobject.sub.fib.wt)
+fibtypeclusternew = c(fibtypecluster[8], fibtypecluster[4], fibtypecluster[6], fibtypecluster[5], fibtypecluster[1], fibtypecluster[3], fibtypecluster[2], fibtypecluster[7])
+
+sobject.sub.fib.wt@active.ident <- factor(x = sobject.sub.fib.wt@active.ident, levels = fibtypeclusternew)
+
+p1 = VlnPlot(sobject.sub.fib.wt, c("Col1a1", "Cdh18", "Sema3c"), flip=T, stack=T)
+
+Plotfolder = "Plots/figure"
+setEPS()
+postscript(file.path(dir, Plotfolder, "Ghr_SM.eps"), height = 5)
+print(p1)
+dev.off()
+```
