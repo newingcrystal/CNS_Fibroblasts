@@ -115,7 +115,7 @@ clustercolumn = "fibtype"
     
     #reorder (by condition)
     tdf = as.data.frame(t)
-    tdf = tdf[c("WT", "cKO"),]
+    tdf = tdf[c("WT", "cKO", "ADWA11"),]
     t = tdf
     
     clusters_to_keep = c("Fibroblast_Prolif", "Fibroblast_Myofibroblast", "Fibroblast_ex-Myofibroblast",  "Fibroblast_Altered-dural_immune", "Fibroblast_Arachnoid",  "Fibroblast_Pial")
