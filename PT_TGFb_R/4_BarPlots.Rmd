@@ -98,6 +98,28 @@ clustercolumn = "fibtype"
           width = .2, cex.names = 0.7,axis.lty = 1, las=2, mgp=c(), beside=TRUE))
     title(xlab = "Cluster", line = 4)
     legend("topright", legend=rownames(t(t)), fill=cols.3, bg="white", inset=c(0.75, 0.02))
+    
+#for pie charts
+    
+    t = r  
+    #remove any clusters that don't have cells
+    t = t[rowSums(t)>0,]
+    
+    #normalize by sample
+    t = apply(t,MARGIN = 2,function(x)x/sum(x))
+    t = round(t*ncells,0)
+    
+    #convert to percents for each cluster
+    t = apply(t,MARGIN = 1,function(x)x/sum(x))
+    t = round(t*100,2)
+    
+    #reorder (by condition)
+    tdf = as.data.frame(t)
+    tdf = tdf[c("WT", "cKO"),]
+    t = tdf
+    
+    clusters_to_keep = c("Fibroblast_Prolif", "Fibroblast_Myofibroblast", "Fibroblast_ex-Myofibroblast",  "Fibroblast_Altered-dural_immune", "Fibroblast_Arachnoid",  "Fibroblast_Pial")
+    t = t[,clusters_to_keep]
 ```
 
 #just cko wt
@@ -146,6 +168,28 @@ clustercolumn = "immunetype"
           width = .2, cex.names = 0.7,axis.lty = 1, las=2, mgp=c(), beside=TRUE))
     title(xlab = "Cluster", line = 4)
     legend("topright", legend=rownames(t(t)), fill=cols.3, bg="white", inset=c(0.75, 0.02))
+    
+    #for pie charts
+    
+    t = r  
+    #remove any clusters that don't have cells
+    t = t[rowSums(t)>0,]
+    
+    #normalize by sample
+    t = apply(t,MARGIN = 2,function(x)x/sum(x))
+    t = round(t*ncells,0)
+    
+    #convert to percents for each cluster
+    t = apply(t,MARGIN = 1,function(x)x/sum(x))
+    t = round(t*100,2)
+    
+    #reorder (by condition)
+    tdf = as.data.frame(t)
+    tdf = tdf[c("WT", "cKO"),]
+    t = tdf
+    
+    clusters_to_keep = c("Immune_Microglia", "Immune_Monocytes_DCs", "Immune_DAMs", "Immune_SAMs", "Immune_PVMs", "Immune_Prolif", "Immune_Mac_other")
+    t = t[,clusters_to_keep]
 ```
 #just adwa11 wt
 ```{r}
