@@ -1,5 +1,6 @@
 # CNS_Fibroblasts
 Code used for RNAseq analysis in "A dynamic fibroblast response shapes wound healing after brain injury," Ewing-Crystal et al.
+
 -------------------------------------------------
 See corresponding folder for R markdown file containing code to analyze indicated dataset, including:
   Visium_R: analysis of spatial transcriptomics experiment (Fig. 1, Extended Data Fig. 2)
@@ -8,6 +9,7 @@ See corresponding folder for R markdown file containing code to analyze indicate
   Marmoset_R, TBI_R, GBM_R: analysis of published single nuclear/cell RNA sequencing data from non-human primate or human CNS injury (Extended Data Fig. 4)
 
 Source data available in GEO at time of publication. Code run using R in RStudio.
+
 -------------------------------------------------
 System requirements:
 
