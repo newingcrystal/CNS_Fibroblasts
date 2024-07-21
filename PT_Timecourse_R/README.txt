@@ -3,10 +3,10 @@ Fibroblast cluster correspondence (code uses working names based on representati
 	Prolif = Prolif
 	Fn1 = Myofibroblast
 	Cd80 = Lymphocyte interactive
-	Ghr = Late myofibroblast
+	Ghr = Late myofibroblast [BioRxiv] or Late Inner Fibroblast
 	Lama1 = Pial
 	Ptgds = Arachnoid
-	Tmeff2 = altered dural
+	Tmeff2 = Altered Dural
 
 Myeloid cell cluster correspondence (code uses working names based on representative DEG):
 	*working name* = *figure name*
