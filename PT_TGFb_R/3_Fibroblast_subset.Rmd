@@ -629,6 +629,13 @@ DoHeatmap(
     raster = F,
     draw.lines = F) + scale_fill_gradientn(colors = rev(RColorBrewer::brewer.pal(n =4, name = "RdBu"))) + theme(axis.text.y = element_text(size = 16))
 dev.off()
+
+Idents(sobject.sub.fib) = "condition"
+levels(sobject.sub.fib) = condition_new
+setEPS()
+postscript(file.path(dir,Plotfolder, "fib-vln-plot_myo.eps"), width = 4, height = 4)
+VlnPlot(sobject.sub.fib, split.by = "condition", markers_short_myo, stack=T, flip=T)
+dev.off()
 ```
 
 ```{r}

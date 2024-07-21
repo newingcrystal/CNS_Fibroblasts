@@ -541,13 +541,14 @@ highlight_fib_short = c("Mki67", "Acta2", "Lrrc15", "Fbn2", "Cthrc1", "Fn1", "Po
 
 Idents(sobject.sub.fib.wt) = "fibtype"
 fibtypecluster = levels(as.factor(sobject.sub.fib.wt$fibtype))
+######################################NOTE: in bioRxiv only####################################
 #Arrange
 #remove pericytes
-fibtypecluster_new = c(fibtypecluster[14], fibtypecluster[6], fibtypecluster[7], fibtypecluster[10], fibtypecluster[2], fibtypecluster[5], fibtypecluster[3]) #remove fibtypecluster[12], pericytes
-noperi = subset(sobject.sub.fib.wt, ident = c("Lama1", "Tmeff2", "Ptgds", "Fn1", "Cd80", "Ghr", "Prolif"))
-avgexp <- AverageExpression(noperi, return.seurat = TRUE, verbose = TRUE)
-#colnames(avgexp) = fibtypecluster_new 
-levels(avgexp) = fibtypecluster_new
+#fibtypecluster_new = c(fibtypecluster[14], fibtypecluster[6], fibtypecluster[7], fibtypecluster[10], fibtypecluster[2], fibtypecluster[5], fibtypecluster[3]) #remove fibtypecluster[12], pericytes
+#noperi = subset(sobject.sub.fib.wt, ident = c("Lama1", "Tmeff2", "Ptgds", "Fn1", "Cd80", "Ghr", "Prolif"))
+#avgexp <- AverageExpression(noperi, return.seurat = TRUE, verbose = TRUE)
+#levels(avgexp) = fibtypecluster_new
+############################################################################
 
 setEPS()
 postscript(file.path(dir,Plotfolder, paste0(name, "no_meninges_fib-heatmap_SHORT.eps")), width = 6.5, height = 6)
@@ -564,7 +565,10 @@ dev.off
 unbiased filter for chemokines
 #------------------------------------------------------------------------------------------#
 
-chemokines = c("Ccl6", "Cxcl14", "Ccl25", "Cxcl9", "Cxcl10", "Ccl9", "Ccl2", "Ccl7",   "Cxcl2", "Ccl19", "Cxcl1", "Ccl8", "Cxcl12", "Cxcl15", "Cxcl16", "Ccl17", "Ccl28", "Cx3cl1", "Cxcl17", "Cxcl5", "Cxcl13", "Ccl22", "Ccl27a", "Ccl12", "Ccl4") #removed "Ccl11", "Ccl3", "Ccl5", pericyte markers
+######################################NOTE: in bioRxiv only####################################
+#chemokines = c("Ccl6", "Cxcl14", "Ccl25", "Cxcl9", "Cxcl10", "Ccl9", "Ccl2", "Ccl7",   "Cxcl2", "Ccl19", "Cxcl1", "Ccl8", "Cxcl12", "Cxcl15", "Cxcl16", "Ccl17", "Ccl28", "Cx3cl1", "Cxcl17", "Cxcl5", "Cxcl13", "Ccl22", "Ccl27a", "Ccl12", "Ccl4") #removed "Ccl11", "Ccl3", "Ccl5", pericyte markers
+##########################################################################
+chemokines = c("Ccl11", "Ccl3", "Ccl5", "Ccl6", "Cxcl14", "Ccl25", "Cxcl9", "Cxcl10", "Ccl9", "Ccl2", "Ccl7",   "Cxcl2", "Ccl19", "Cxcl1", "Ccl8", "Cxcl12", "Cxcl15", "Cxcl16", "Ccl17", "Ccl28", "Cx3cl1", "Cxcl17", "Cxcl5", "Cxcl13", "Ccl22", "Ccl27a", "Ccl12", "Ccl4")
 
 #Make heatmaps
 setEPS()
@@ -763,5 +767,17 @@ Plotfolder = "Plots/figure"
 setEPS()
 postscript(file.path(dir, Plotfolder, "Ghr_SM.eps"), height = 5)
 print(p1)
+dev.off()
+```
+
+```{r}
+# tree using sobject.sub.fib.wt
+Idents(sobject.sub.fib.wt) = "fibtype"
+sobject.sub.fib.wt= BuildClusterTree(sobject.sub.fib.wt,dims = pcs)
+tree = sobject.sub.fib.wt@tools$BuildClusterTree
+
+setEPS()
+postscript(file.path(dir,"Trees",paste0(project,"_",iterationname,"_tree_wildtype.eps")))
+plot.phylo(tree, use.edge.length = T, direction = "rightwards")
 dev.off()
 ```

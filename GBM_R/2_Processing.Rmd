@@ -528,3 +528,43 @@ dev.off()
 ```{r}
 save(sobject.sub.fib,file = file.path(dir,datafolder,paste0("/seurat/", project,"_",iterationname,".RData")))
 ```
+
+```{r}
+#Myofibroblast score
+
+require(biomaRt)
+
+features_tgfb_filter = read.csv("/Users/nathanewing-crystal/Ari Molofsky Lab Dropbox/Ari Molofsky Lab Team Folder/Nathan Ewing-Crystal/RNASeq/Visium/Seurat/Data/Other/tgfb-vs-pbs.csv")
+
+features_tgfb_filter = features_tgfb_filter$Cs
+
+### If you are using a mouse data, then its needed to convert the gene names to human orthologs
+
+human = useMart("ensembl", dataset = "hsapiens_gene_ensembl", host = "dec2021.archive.ensembl.org")
+mouse = useMart("ensembl", dataset = "mmusculus_gene_ensembl", host = "dec2021.archive.ensembl.org")
+
+#change to rownames(matrix1) from rownames(alldata@assays$RNA@data)
+genesV2 = getLDS(attributes = c("mgi_symbol"), filters = "mgi_symbol", values = features_tgfb_filter , mart = mouse, attributesL = c("hgnc_symbol","hgnc_id",'ensembl_gene_id'), martL = human, uniqueRows=T)
+print(head(genesV2))
+features_tgfb_filter_human = genesV2$HGNC.symbol
+genes = list(features_tgfb_filter_human)
+
+sobject.sub.fib <- AddModuleScore(
+  sobject.sub.fib,
+  genes,
+  pool = NULL,
+  nbin = 24,
+  ctrl = 100,
+  name = "tgfb_score",
+  seed = 1,
+  search = TRUE,
+)
+
+Plotfolder = "/Users/nathanewing-crystal/Ari Molofsky Lab Dropbox/Ari Molofsky Lab Team Folder/Nathan Ewing-Crystal/RNASeq/GBM_Seq/Plots/Fibroblast Subset/Myofib_score"
+name = "tgfb_score.eps"
+
+  setEPS()
+  postscript(file.path(Plotfolder,name))
+VlnPlot(sobject.sub.fib, "tgfb_score1")
+  dev.off()
+```
