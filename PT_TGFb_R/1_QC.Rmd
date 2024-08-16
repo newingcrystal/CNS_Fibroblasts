@@ -261,7 +261,7 @@ Filtering cells: note that they are taking these filters and duplicating them ac
 How to select filters??? noise vs signal - get them from the violin plots and the matrix, capture the bulk of cells but exclude outliers (say with mtDNA filter) - can also look at percentiles, maybe get rid of top 5% since it was very different from the rest. Basically eliminate outliers and don't include cells that have hardly any genes or have a ton of genes expressed. First save the original object: 
 
 ```{r}
-save(sobject,file = file.path(dir,"Data/Seurat",paste0(project,"_beforeQC.RData")))
+save(sobject.merge,file = file.path(dir,"Data/Seurat",paste0(project,"_beforeQC.RData")))
 ```
 
 Subset the data. Printing tables lets you see the progression as you tighten your QC cutoffs. 
