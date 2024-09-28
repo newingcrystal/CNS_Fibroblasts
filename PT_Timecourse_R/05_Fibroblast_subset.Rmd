@@ -541,6 +541,12 @@ highlight_fib_short = c("Mki67", "Acta2", "Lrrc15", "Fbn2", "Cthrc1", "Fn1", "Po
 
 Idents(sobject.sub.fib.wt) = "fibtype"
 fibtypecluster = levels(as.factor(sobject.sub.fib.wt$fibtype))
+#Arrange
+fibtypecluster_new = c(fibtypecluster[12], fibtypecluster[14], fibtypecluster[6], fibtypecluster[7], fibtypecluster[10], fibtypecluster[2], fibtypecluster[5], fibtypecluster[3])
+fibtypecluster_new[1] = "Mural-Pericyte" #fix dash-vs-underscore error
+avgexp <- AverageExpression(sobject.sub.fib.wt, return.seurat = TRUE, verbose = TRUE)
+levels(avgexp) = fibtypecluster_new
+
 ######################################NOTE: in bioRxiv only####################################
 #Arrange
 #remove pericytes
@@ -562,13 +568,20 @@ DoHeatmap(
 dev.off
 
 #------------------------------------------------------------------------------------------#
-unbiased filter for chemokines
+#unbiased filter for chemokines
 #------------------------------------------------------------------------------------------#
 
 ######################################NOTE: in bioRxiv only####################################
 #chemokines = c("Ccl6", "Cxcl14", "Ccl25", "Cxcl9", "Cxcl10", "Ccl9", "Ccl2", "Ccl7",   "Cxcl2", "Ccl19", "Cxcl1", "Ccl8", "Cxcl12", "Cxcl15", "Cxcl16", "Ccl17", "Ccl28", "Cx3cl1", "Cxcl17", "Cxcl5", "Cxcl13", "Ccl22", "Ccl27a", "Ccl12", "Ccl4") #removed "Ccl11", "Ccl3", "Ccl5", pericyte markers
 ##########################################################################
-chemokines = c("Ccl11", "Ccl3", "Ccl5", "Ccl6", "Cxcl14", "Ccl25", "Cxcl9", "Cxcl10", "Ccl9", "Ccl2", "Ccl7",   "Cxcl2", "Ccl19", "Cxcl1", "Ccl8", "Cxcl12", "Cxcl15", "Cxcl16", "Ccl17", "Ccl28", "Cx3cl1", "Cxcl17", "Cxcl5", "Cxcl13", "Ccl22", "Ccl27a", "Ccl12", "Ccl4")
+chemokines_pericyte = c("Ccl11", "Ccl3", "Ccl5", "Ccl6", "Cxcl14", "Ccl25", "Cxcl9", "Cxcl10", "Ccl9", "Ccl2", "Ccl7",   "Cxcl2", "Ccl17", "Ccl19", "Cxcl1", "Ccl8", "Cxcl12", "Cxcl15", "Cxcl16", "Ccl28", "Cx3cl1", "Cxcl17", "Cxcl5", "Cxcl13", "Ccl22", "Ccl27a", "Ccl12", "Ccl4")
+
+genes = rownames(sobject.sub.fib.wt)
+chemokines_all = grep("Ccl|Cxcl|Cx3cl", genes, value = TRUE)
+p1 = DotPlot(sobject.sub.fib.wt, chemokines_all, group.by = "fibtype")
+
+chemokines_filtered = as.vector(unique(p1$data[(p1$data$pct.exp > 0.5),3]))
+chemokines_threshold = chemokines_pericyte[chemokines_pericyte %in% chemokines_filtered]
 
 #Make heatmaps
 setEPS()
