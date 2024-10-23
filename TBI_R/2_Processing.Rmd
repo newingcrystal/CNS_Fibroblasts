@@ -105,14 +105,14 @@ variance = T
 
 Function to print multiple graphs: 
 ```{r}
-PrintSeuratGraph = function(namecard = "a",seurat_object = sobject,graphtype = "feature",feature = NULL,group = NULL,split=NULL,cellnames=NULL, label=FALSE){
+PrintSeuratGraph = function(namecard = "a",seurat_object = sobject,graphtype = "feature",feature = NULL,group = NULL,split=NULL,cellnames=NULL, label=FALSE, order=NULL){
   if (!is.null(cellnames)){
     #Idents(seurat_object) = cellnames[1]
     #cells = colnames(seurat_object)[Idents(seurat_object) %in% cellnames[1:length(cellnames)]]} 
     cells = cellnames}
   else {cells = cellnames}
   if (graphtype == "feature"){
-    graph = FeaturePlot(seurat_object,features = feature,split.by = split, cells = cells,cols = c("lightyellow","darkred"))
+    graph = FeaturePlot(seurat_object,features = feature,split.by = split, cells = cells,cols = c("lightyellow","darkred"),order=order)
   }
   if (graphtype == "violin"){
     graph = VlnPlot(seurat_object,features = feature, pt.size = 0.1, idents = cellnames[2:length(cellnames)],group.by = group, split.by = split)
@@ -596,4 +596,17 @@ VlnPlot(sobject.sub.fib, "tgfb_score1")
   dev.off()
 ```
 
+#MYELOID
+```{r}
+Plotfolder = "Plots"
+name = paste0(project,"_",iterationname)
+
+PrintSeuratGraph(namecard = paste0(name, "_ordered"),graphtype = "feature",feature = "TGFB1", order=T)
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "fab5_density.eps"), width = 12)
+plot_density(sobject, c("TREM2", "CD9", "SPP1", "GPNMB", "CD63"), joint=T)
+dev.off()
+
+```
 

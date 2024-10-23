@@ -34,6 +34,8 @@ if (!require("BiocManager", quietly = TRUE))
      install.packages("BiocManager")
 BiocManager::install("MAST")
 library(MAST)
+BiocManager::install("Nebulosa")
+library(Nebulosa)
 install.packages('gplots')
 library(gplots)
 ```
@@ -90,13 +92,13 @@ DimPlot(sobj)
 
 Function to print multiple graphs: 
 ```{r}
-PrintSeuratGraph = function(namecard = "a",seurat_object = sobj,graphtype = "feature",feature = NULL,group = NULL,split=NULL,cellnames=NULL){
+PrintSeuratGraph = function(namecard = "a",seurat_object = sobj,graphtype = "feature",feature = NULL,group = NULL,split=NULL,cellnames=NULL,order=NULL){
   if (!is.null(cellnames)){
     Idents(seurat_object) = cellnames[1]
     cells = colnames(seurat_object)[Idents(seurat_object) %in% cellnames[2:length(cellnames)]]} 
   else {cells = cellnames}
   if (graphtype == "feature"){
-    graph = FeaturePlot(seurat_object,features = feature,split.by = split, cells = cells,cols = c("lightyellow","darkred"))
+    graph = FeaturePlot(seurat_object,features = feature,split.by = split, cells = cells,cols = c("lightyellow","darkred"),order=order)
   }
   if (graphtype == "violin"){
     graph = VlnPlot(seurat_object,features = feature, pt.size = 0.1, idents = cellnames[2:length(cellnames)],group.by = group, split.by = split)
@@ -212,6 +214,24 @@ markers_fibroblast_subsets = FindAllMarkers(
 write.csv(markers_fibroblast_subsets, 
            "../Tables/fibroblast_subsets.csv")
 
+```
+
+#Myeloid graphs
+```{r}
+#Specify your preferred directory for all input + output
+dir= "/Users/nathanewing-crystal/Ari Molofsky Lab Dropbox/Ari Molofsky Lab Team Folder/Nathan Ewing-Crystal/RNASeq/Bourne Astrocytes/"
+
+Plotfolder = "Plots/Myeloid"
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "fab5_density.eps"), width = 12)
+plot_density(sobj_sub18, c("TREM2", "CD9", "SPP1", "GPNMB", "CD63"), joint=T)
+dev.off()
+
+name = "figure"
+PrintSeuratGraph(seurat_object = sobj_sub18, namecard = name,graphtype = "feature",feature = "TGFB1")
+name = "figure_ordered"
+PrintSeuratGraph(seurat_object = sobj_sub18, namecard = name,graphtype = "feature",feature = "TGFB1", order=T)
 ```
 
 ```{r}
