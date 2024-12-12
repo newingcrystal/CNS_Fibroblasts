@@ -567,4 +567,11 @@ name = "tgfb_score.eps"
   postscript(file.path(Plotfolder,name))
 VlnPlot(sobject.sub.fib, "tgfb_score1")
   dev.off()
+  
+#sig
+#install.packages("dunn.test")
+library("dunn.test")
+sobject.sub.fib$fibcluster = Idents(sobject.sub.fib)
+sobject_metadata = data.frame(sobject.sub.fib@meta.data) #creates dataframe of metadata in sobject
+dunn.test(x = sobject_metadata$tgfb_score1, g = sobject_metadata$fibcluster, method="bonferroni", kw=T, label=T)
 ```

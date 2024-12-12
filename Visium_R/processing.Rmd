@@ -698,7 +698,7 @@ dev.off()
 
 setEPS()
 postscript(file.path(dir, Plotfolder, "tgfb.eps"), width = 3.5, height = 4)
-VlnPlot(vobj.merge.sub10, idents = c("7dpi", "21dpi"), "tgfb_score1")
+VlnPlot(sub, idents = c("7dpi", "21dpi"), "tgfb_score1")
 dev.off()
 
 
@@ -719,6 +719,13 @@ setEPS()
 postscript(file.path(dir, Plotfolder, "spatial_tgfb_normalized_scale.eps"))
 p1[[1]] + sc + p1[[2]] + sc + p1[[3]] + sc
 dev.off()
+
+#sig
+sobject_metadata = data.frame(sub@meta.data) #creates dataframe of metadata in sobject
+sobject_metadata = sobject_metadata[sobject_metadata$timepoint %in% c("7dpi","21dpi"),]
+
+wilcox.test(sobject_metadata$proliferation_score1 ~ sobject_metadata$timepoint)
+wilcox.test(sobject_metadata$tgfb_score1 ~ sobject_metadata$timepoint)
 
 ```
 

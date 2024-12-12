@@ -343,4 +343,7 @@ postscript(file.path(dir,Plotfolder, "itgae.eps"))
 VlnPlot(compare, "Itgae", split.by = "condition")
 dev.off()
 
+#sig
+p1 = VlnPlot(compare, "Itgae", split.by = "condition")
+wilcox.test(p1$data$Itgae ~ p1$data$split)
 ```

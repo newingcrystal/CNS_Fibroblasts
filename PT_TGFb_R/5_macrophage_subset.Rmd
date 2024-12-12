@@ -500,6 +500,15 @@ postscript(file.path(dir, Plotfolder, "dysmature_vlnplot.eps"))
 p1
 dev.off()
 
+#sig
+sobject_metadata = data.frame(compare2@meta.data) #creates dataframe of metadata in sobject
+sobject_metadata_dams = sobject_metadata[sobject_metadata$immunetype == "DAMs",]
+wilcox.test(sobject_metadata_dams$dysmature_mg_score_bulkseq1 ~ sobject_metadata_dams$condition)
+sobject_metadata_sams = sobject_metadata[sobject_metadata$immunetype == "SAMs",]
+wilcox.test(sobject_metadata_sams$dysmature_mg_score_bulkseq1 ~ sobject_metadata_sams$condition)
+sobject_metadata_pvms = sobject_metadata[sobject_metadata$immunetype == "PVMs",]
+wilcox.test(sobject_metadata_pvms$dysmature_mg_score_bulkseq1 ~ sobject_metadata_pvms$condition)
+
 my.pal = palette(brewer.pal(n = 8, name = "YlOrRd"))
 compare$condition = factor(compare$condition, levels = c("WT", "ADWA11"))
 p1 = Plot_Density_Custom(compare, "dysmature_mg_score_bulkseq1", custom_palette = my.pal) + facet_grid(.~compare$condition)

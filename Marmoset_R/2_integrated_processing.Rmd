@@ -398,4 +398,8 @@ name = "tgfb_score.eps"
   postscript(file.path(Plotfolder,name))
 VlnPlot(sobject, "tgfb_score1")
   dev.off()
+  
+    #sig
+sobject_metadata = data.frame(sobject@meta.data) #creates dataframe of metadata in sobject
+wilcox.test(sobject_metadata$tgfb_score1 ~ sobject_metadata$condition)
 ```
