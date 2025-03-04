@@ -234,7 +234,7 @@ for(i in 1:length(old_clusters)){
     PrintSeuratGraph(namecard = name,graphtype = "violin",feature = feature_name,group = "seurat_clusters")
 }
 
-p1 = VlnPlot(sobject.sub.myeloid, c("DAMs_score1", "Macrophage_Ldlrad3_score1", "Macrophage_Cd206_score1", "Prolif_score1", "Macrophage_ECM_score1", "Microglia_score1", "Monocytes_DCs_score1"), stack=T, group.by = "immunetype")
+p1 = VlnPlot(sobject.sub.myeloid, c("DAMs_score1", "Macrophage_Ldlrad3_score1", "Macrophage_Cd206_score1", "Prolif_score1", "Macrophage_ECM_score1", "Microglia_score1", "Monocytes_DCs_score1", "DCs_score1", "Osteoclasts_score1"), stack=T, group.by = "immunetype")
 p1$data$ident <- factor(x = p1$data$ident, levels = rev(c("DAMs", "SAMs", "PVMs", "Prolif", "Mac_other", "Microglia", "Monocytes_DCs")))
 
 Plotfolder = "Plots/figure"

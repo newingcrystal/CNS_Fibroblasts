@@ -379,9 +379,10 @@ write.csv(markers_all,file = file.path(dir,"Spreadsheets",paste0(project, "_", i
 
 ```{r}
 Idents(sobject.sub.immune) = "immunetype"
-clusters_to_keep = c("DAMs", "Macrophage_Ldlrad3", "Macrophage_CD206", "Macrophage_ECM", "Monocytes_DCs", "Microglia")
+clusters_to_keep = c("DAMs", "Macrophage_Ldlrad3", "Macrophage_CD206", "Macrophage_ECM", "Monocytes_DCs", "DCs", "Microglia", "Osteoclasts")
 
 sobject.sub.mac = subset(sobject.sub.immune, idents = clusters_to_keep)
+Idents(sobject.sub.mac) = factor(Idents(sobject.sub.mac), levels = clusters_to_keep)
 ```
 
 ```{r,eval = FALSE}
@@ -414,6 +415,7 @@ Plotfolder = "Plots/figure"
 Idents(sobject.sub.mac) = "genotype"
 sobject.sub.mac.wt = subset(sobject.sub.mac, ident = "WT")
 Idents(sobject.sub.mac.wt) = "immunetype"
+Idents(sobject.sub.mac.wt) = factor(Idents(sobject.sub.mac.wt), levels = clusters_to_keep)
 setEPS()
 postscript(file.path(dir,Plotfolder, paste0(project, iterationname, "mac_dim_label.eps")), width = 6, height = 5)
 DimPlot(sobject.sub.mac.wt, label = T, repel = T, label.size = 4)
