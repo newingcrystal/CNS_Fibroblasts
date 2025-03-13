@@ -9,11 +9,13 @@ TOTAL:
 
 3) Processed: PCA, UMAP, cell type assignments, running "NormalizeData" and "ScaleData" (much larger Seurat object)
 	
-4) Final_withfibtype: added fib type from sobject.sub.fib_reclustered (2, below x1); removed doublet clusters 1, 3 (neurons, macrophages, as in 3, below 
+4) Final_withfibtype: added fib type from sobject.sub.fib_reclustered (2, below x1)
 
 5) Final_withfibtype_withimmunetype: added immune type from sobject.sub.immune.reclustered (2, below x2)
 
 6) Final_withfibtype_withimmunetype_withttype: added t type from sobject.sub.t.reclustered (2, below x3)
+
+7) Final_withfibtype_withimmunetype_withttype_nodoublets: removed *fibroblast* doublet clusters 1, 3 (neurons, macrophages)
 
 ----------------------------------------------------------------------------------------------
 
