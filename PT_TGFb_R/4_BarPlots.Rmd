@@ -149,7 +149,7 @@ clustercolumn = "immunetype"
     tdf = tdf[,c("WT", "cKO")]
     t = tdf
     
-    clusters_to_keep = c("Immune_DAMs", "Immune_SAMs", "Immune_PVMs", "Immune_Microglia", "Immune_Mac_other",  "Immune_Monocytes_DCs", "Immune_Prolif")
+    clusters_to_keep = c("Immune_Microglia", "Immune_Monocytes_DCs", "Immune_DAMs", "Immune_SAMs", "Immune_PVMs", "Immune_Prolif", "Immune_Mac_other")
     t = t[clusters_to_keep,]
 
     name = paste0(project,"_", "MYELOID_cluster-frequencies_of_total_noADWA11")
@@ -190,51 +190,4 @@ clustercolumn = "immunetype"
     
     clusters_to_keep = c("Immune_Microglia", "Immune_Monocytes_DCs", "Immune_DAMs", "Immune_SAMs", "Immune_PVMs", "Immune_Prolif", "Immune_Mac_other")
     t = t[,clusters_to_keep]
-```
-#just adwa11 wt
-```{r}
-# Below uses total sobject
-# measure immune subsets across timepoints as % of a) total cells or b) lesion
-sobject_sub = sobject
-clustercolumn = "immunetype"
-  
-  #Make a table and normalize
-  r = table(sobject_sub[[clustercolumn]][,1],sobject_sub[[samplecolumn]][,1])
-    
-    t = r  
-    #remove any clusters that don't have cells
-    t = t[rowSums(t)>0,]
-    
-    #normalize by sample
-    t = apply(t,MARGIN = 2,function(x)x/sum(x))
-    t = round(t*ncells,0)
-    
-    #convert to percents for each *sample*
-    t = apply(t,MARGIN = 2,function(x)x/sum(x))
-    t = round(t*100,2)
-    
-    #reorder (by condition)
-    tdf = as.data.frame(t)
-    tdf = tdf[,c("WT", "ADWA11")]
-    t = tdf
-    
-    clusters_to_keep = c("Immune_DAMs", "Immune_SAMs", "Immune_PVMs", "Immune_Microglia", "Immune_Mac_other",  "Immune_Monocytes_DCs", "Immune_Prolif")
-    t = t[clusters_to_keep,]
-
-    name = paste0(project,"_", "MYELOID_cluster-frequencies_of_total_nocKO")
-    
-    setEPS()
-    postscript(file.path(dir,"Plots/Barplots",paste0(name,"barplot.eps")))
-    barplot(t(t), main="Sample composition by cluster",
-         ylab = "% of sample", col=cols.2,axisnames = T,
-          width = .2, cex.names = 0.7,axis.lty = 1, las=2, mgp=c(), beside=TRUE)
-    title(xlab = "Cluster", line = 4)
-    legend("topright", legend=rownames(t(t)), fill=cols.2, bg="white", inset=c(0.2, 0.02))
-    dev.off()
-  
-    print(barplot(t(t), main="Sample composition by cluster",
-         ylab = "% of sample", col=cols.2,axisnames = T,
-          width = .2, cex.names = 0.7,axis.lty = 1, las=2, mgp=c(), beside=TRUE))
-    title(xlab = "Cluster", line = 4)
-    legend("topright", legend=rownames(t(t)), fill=cols.3, bg="white", inset=c(0.2, 0.02))
 ```

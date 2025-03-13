@@ -404,7 +404,7 @@ save(sobject.sub.t,file = file.path(dir,datafolder,paste0(project,"_",iterationn
 
 ********WITHOUT DOUBLETS********
 Note - removed doublets in "3_Fibroblast_subset.Rmd
-Here, use 4 (iterationname = "final_withfibtype", doublets removed)
+Here, use 7 (iterationname = "final_withfibtype_withimmunetype_withttype_doublets removed")
 
 Block to print multiple graphs: 
 ```{r}

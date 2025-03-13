@@ -284,6 +284,23 @@ plot.phylo(tree, use.edge.length = T, direction = "rightwards")
 dev.off()
 ```
 
+```{r}
+#Cluster 1: Nrxn1-3 (doublets)
+#Cluster 3: Myeloid (doublets)
+#(not doublets by DoubletFinder [see 5_DoubletFinder.Rmd], but express fibroblast and macrophage or neuron genes --> maybe safer to exclude))
+
+#Exclude unwanted clusters
+Idents(sobject.sub.fib) = "sub.cluster"
+
+clusters_minus_doublets = c(0, 2, 4:9)
+sobject.sub.fib.final = subset(sobject.sub.fib, idents = clusters_minus_doublets)
+sobject.sub.fib = sobject.sub.fib.final
+
+iterationname = "fib_final"
+save(sobject.sub.fib,file = file.path(dir,datafolder,paste0(project,"_",iterationname,"_v2.RData")))
+
+```
+
 ***WITHOUT DOUBLETS***
 ```{r}
 Plotfolder = "Plots/Fibroblast Subset"
@@ -444,9 +461,10 @@ dev.off()
 ```
 
 ```{r}
-#add fibtype to total sobject
-load("/Users/nathanewing-crystal/Ari Molofsky Lab Dropbox/Ari Molofsky Lab Team Folder/Nathan Ewing-Crystal/RNASeq/Lesion snRNASeq 2 Tgfb/seurat/Data/Seurat/tgfb_lesion_snRNASeq_scaled_processed.RData")
-rm(sobject.sub.fib())
+#pre typo:
+#load("/Users/nathanewing-crystal/Ari Molofsky Lab Dropbox/Ari Molofsky Lab Team Folder/Nathan Ewing-Crystal/RNASeq/Lesion snRNASeq 2 Tgfb/seurat/Data/Seurat/tgfb_lesion_snRNASeq_scaled_processed.RData")
+#post typo (see below):
+load("/Users/nathanewing-crystal/Ari Molofsky Lab Dropbox/Ari Molofsky Lab Team Folder/Nathan Ewing-Crystal/RNASeq/Lesion snRNASeq 2 Tgfb/seurat/Data/Seurat/Old/6 Ttype/tgfb_lesion_snRNASeq_final_withfibtype_withimmunetype_withttype.RData")
 load("/Users/nathanewing-crystal/Ari Molofsky Lab Dropbox/Ari Molofsky Lab Team Folder/Nathan Ewing-Crystal/RNASeq/Lesion snRNASeq 2 Tgfb/seurat/Data/Seurat/Fibroblast Subset/2 Reclustered/tgfb_lesion_snRNASeq_fib_reclustered.RData") #use old sobject.sub.fib ("reclustered"), then remove doublets
 
 celltype = as.character(sobject$celltype)
@@ -476,15 +494,24 @@ sobject$fibtypecluster = celltypecluster
 Idents(sobject) = "fibtype"
 
 fibtype_keep = levels(sobject)
-fibtype_keep = fibtype_keep[!(fibtype_keep %in% c("Fibroblasts_Fib_1", "Fibroblasts_Fib_2"))]
-sobject = subset(sobject, idents = fibtype_keep)
+fibtype_keep = fibtype_keep[!(fibtype_keep %in% c("Fibroblast_Fib_1", "Fibroblast_Fib_2"))]
+sobject_old = sobject
+rm(sobject) #for memory
+rm(sobject.sub.fib) #so don't keep old fib object
+sobject = subset(sobject_old, idents = fibtype_keep)
+rm(sobject_old) #for memory
+# Note - originally, typo in above - removed "Fibroblasts_Fib_1" (etc.) instead of "Fibroblast_Fib_1" (etc.)
+  # Doublet clusters not removed, propagated through versions of total sobject
+  # Saved as "final_withfibtype"
+# Here, adjusted typo
+  # Saved as "final_withfibtype_withimmunetype_withttype_nodoublets"
 
-iterationname = "final_withfibtype"
+# Original [had not yet corrected doublets]
+# iterationname = "final_withfibtype"
+iterationname = final_withfibtype_withimmunetype_withttype_nodoublets
 
 datafolder = "Data/Seurat"
 save(sobject,file = file.path(dir,datafolder,paste0(project,"_",iterationname,".RData")))
-
-rm(sobject.sub.fib) #so don't keep old fib object
 ```
 
 ***GENE SET TESTING**
