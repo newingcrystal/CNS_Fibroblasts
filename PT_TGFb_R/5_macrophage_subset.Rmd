@@ -508,6 +508,7 @@ sobject_metadata_sams = sobject_metadata[sobject_metadata$immunetype == "SAMs",]
 wilcox.test(sobject_metadata_sams$dysmature_mg_score_bulkseq1 ~ sobject_metadata_sams$condition)
 sobject_metadata_pvms = sobject_metadata[sobject_metadata$immunetype == "PVMs",]
 wilcox.test(sobject_metadata_pvms$dysmature_mg_score_bulkseq1 ~ sobject_metadata_pvms$condition)
+#Bonferroni correction - multiply by 3
 
 my.pal = palette(brewer.pal(n = 8, name = "YlOrRd"))
 compare$condition = factor(compare$condition, levels = c("WT", "ADWA11"))

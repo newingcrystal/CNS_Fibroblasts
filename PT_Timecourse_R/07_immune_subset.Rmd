@@ -453,25 +453,13 @@ p1 = VlnPlot(subset(sobject.sub.mac.wt, subset = timepoint == c("7dpi", "21dpi")
 p1$data$split <- factor(x = p1$data$split, levels = c("7dpi", "21dpi"))
 
 #sig
-#install.packages("dunn.test")
-library("dunn.test")
-sobject_metadata = data.frame(sobject.sub.mac.wt@meta.data) #creates dataframe of metadata in sobject
-sobject_metadata.sub = sobject_metadata[sobject_metadata$immunetype %in% c("DAMs", "Macrophage_Ldlrad3"),]
-sobject_metadata.sub2 = sobject_metadata.sub[sobject_metadata.sub$timepoint %in% c("7dpi", "21dpi"),]
-sobject_metadata.sub2$time_type = paste0(sobject_metadata.sub2$timepoint, "_", sobject_metadata.sub2$immunetype)
-dunn.test(x = sobject_metadata.sub2$fab5_score1, g = sobject_metadata.sub2$time_type, method="bonferroni", kw=T, label=T)
-#alt sig
 sobject_metadata = data.frame(sobject.sub.mac.wt@meta.data) #creates dataframe of metadata in sobject
 sobject_metadata_dams = sobject_metadata[sobject_metadata$immunetype == "DAMs" & sobject_metadata$timepoint %in% c("7dpi", "21dpi"),]
 wilcox.test(sobject_metadata_dams$fab5_score1 ~ sobject_metadata_dams$timepoint)
 sobject_metadata_sams = sobject_metadata[sobject_metadata$immunetype == "Macrophage_Ldlrad3" & sobject_metadata$timepoint %in% c("7dpi", "21dpi"),]
 wilcox.test(sobject_metadata_sams$fab5_score1 ~ sobject_metadata_sams$timepoint)
+#Bonferroni correction - multiply by 2
 
-Idents(sobject.sub.mac.wt) = "timepoint"
-s2 = subset(sobject.sub.mac.wt, subset = immunetype == c("DAMs", "Macrophage_Ldlrad3"))
-corrected_immunetype = as.matrix(s2$immunetype)
-s2$immunetype = corrected_immunetype
-p2 = VlnPlot(s2, features = "fab5_score1", idents = c("7dpi", "21dpi"), split.by = "immunetype", split.plot=T)
 setEPS()
 postscript(file.path(dir,Plotfolder, paste0(project, iterationname, "fab5_timecourse.eps")), height = 4.5, width = 3)
 p1
