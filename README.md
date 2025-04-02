@@ -3,10 +3,15 @@ Code used for RNAseq analysis in "Dynamic fibroblast-immune interactions shape w
 
 -------------------------------------------------
 See corresponding folder for R markdown file containing code to analyze indicated dataset, including:
+  
   Visium_R: analysis of spatial transcriptomics experiment (Fig. 1, Extended Data Fig. 2,6)
+  
   PT_Timecourse_R: analysis of first single nuclear RNA sequencing experiment (Fig. 2,3, Extended Data Fig. 3,5,6)
-  PT_TGFb_R: analysis of second single nuclear RNA sequencing experiment (Fig. 4, Extended Data Fig. 9)
+
   Marmoset_R, TBI_R, GBM_R: analysis of published single nuclear/cell RNA sequencing data from non-human primate or human CNS injury (Extended Data Fig. 3)
+  
+  PT_TGFb_R: analysis of second single nuclear RNA sequencing experiment (Fig. 4, Extended Data Fig. 9)
+   
   PT_CXCL12_R: analysis of third single nuclear RNA sequencing experiment (FIg. 5, Extended Data Fig. 10)
 
 Source data available in GEO at time of publication. Code run using R in RStudio.
