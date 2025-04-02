@@ -1,0 +1,526 @@
+---
+title: "5_Neurons"
+author: "Nathan Ewing-Crystal"
+date: "2025-02-03"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+library(ape)
+library(cowplot)
+library(Matrix)
+library(MAST)
+#install.packages('EnhancedVolcano')
+library(EnhancedVolcano)
+
+library("devtools")
+#devtools::install_github("powellgenomicslab/Nebulosa")
+library("Nebulosa")
+#install.packages("scCustomize")
+library(scCustomize)
+
+#BiocManager::install("goseq")
+library(goseq)
+#BiocManager::install("TxDb.Mmusculus.UCSC.mm10.ensGene")
+library(TxDb.Mmusculus.UCSC.mm10.ensGene)
+#BiocManager::install("org.Mm.eg.db")
+library(org.Mm.eg.db)
+#BiocManager::install("clusterProfiler")
+library(clusterProfiler)
+```
+
+#Load seurat object
+```{r}
+load(file.choose())
+#load sobject.sub.neuron
+```
+
+```{r}
+#Specify your preferred directory for all input + output
+dir = "/Users/nathanewing-crystal/Ari Molofsky Lab Dropbox/Ari Molofsky Lab Team Folder/Nathan Ewing-Crystal/RNASeq/Lesion snRNASeq 3 Cxcl12/seurat"
+#Specify exactly where your seurat files live
+datafolder = "Data/Seurat/Neuron Subset"
+
+project<-"cxcl12_lesion_snRNASeq"  
+
+#set up folders
+QCfolder = "QC"
+Plotfolder = "Plots/Neuron subset"
+
+#Decide whether to use SCtransform (can take a long time with big datasets; generally recommended)
+sct = TRUE
+
+#You can add in housekeeping genes if you want them to be scaled always; otherwise set to "NULL"
+add.genes = NULL
+
+#How many genes do you want scaled to use for UMAP/clustering? 
+ngenes = 6000
+
+#Which principal components do you want to calculate on? This is a default setting, change if one of the pc's is for something you think is a technical error (i.e. HSP, RP, etc)
+pcs = c(1:30)
+
+#Choose what to regress out - could be age, sex, or any metadata column
+regress = c("nCount_RNA","percent.mito")
+
+#clustering resolution; the last number will be saved as "seurat_clusters" in metadata
+res = c(1.5,1.0,0.5, 0.4, 0.35, 0.3, 0.25, 0.2, 0.15, 0.1)
+
+#metadata dimensions you want to cluster on
+dims = c("seurat_clusters","sample", "subsample", "timepoint","genotype", "microanatomy")
+
+#make a unique name; maybe this is the celltype you've already subset, or the age you're looking at, etc.
+iterationname = "neuron_reclustered"
+
+#Establish cutoffs for heatmaps
+pval = 1e-3 #max p-value for significance
+lfc = 0.2 #minimum log fold change
+minpct = 0.05 #if you want to subset by percent cells in that cluster expressing the gene
+maxpct = 1
+single = F #should each gene be a marker of a single cluster only
+hgenes = 3 #how many genes should be in the heatmap per cluster
+ncells = 100 #max # of cells per heatmap column
+column = "seurat_clusters" #division you care about
+```
+
+Find variable features, normalize, scale, run PCA, clustering, umap
+The following is the standard method of normalization and scaling. Interchangeable with the next chunk. Run both, you should have already specified which to use with "sct = T or F". Will take 5-20 minutes to run. 
+```{r,results = 'hide',eval = FALSE}
+if (!sct){
+  sobject.sub.neuron <- NormalizeData(sobject.sub.neuron,normalization.method = "LogNormalize", scale.factor = 10000)
+  sobject.sub.neuron<-FindVariableFeatures(sobject.sub.neuron, selection.method = "vst", nfeatures = ngenes)
+  
+  all.genes<-rownames(sobject.sub.neuron)
+  var.genes = VariableFeatures(sobject.sub.neuron)
+  add.genes = add.genes[!add.genes %in% var.genes]
+  
+  any(add.genes %in% var.genes)
+  scalegenes = c(var.genes,add.genes)
+  VariableFeatures(sobject.sub.neuron) = scalegenes
+  sobject.sub.neuron<-ScaleData(sobject.sub.neuron,features = VariableFeatures(sobject.sub.neuron), vars.to.regress = regress)
+}
+```
+
+Alternative: SCTransform (great for smaller datasets)
+```{r, results='hide',eval = FALSE}
+if (sct){
+  sobject.sub.neuron <- SCTransform(sobject.sub.neuron, vars.to.regress = regress, verbose = FALSE,variable.features.n = ngenes,conserve.memory = T)
+}
+```
+
+Show most variable genes
+```{r}
+labels <- c(head(VariableFeatures(sobject.sub.neuron),10),add.genes)
+plot1 = VariableFeaturePlot(sobject.sub.neuron)
+LabelPoints(plot=plot1, points = labels, repel = F, xnudge = 0.1, ynudge = 0.5)
+```
+
+Run PCA analysis and show elbow plot
+```{r}
+sobject.sub.neuron <- RunPCA(sobject.sub.neuron,features = VariableFeatures(sobject.sub.neuron),npcs = 50, verbose = FALSE)
+ElbowPlot(sobject.sub.neuron,ndims = 50, reduction = "pca")
+print(sobject.sub.neuron[["pca"]], dims = 1:20, nfeatures = 5)
+```
+
+Once you are satisfied with pc's, run clustering: 
+```{r}
+sobject.sub.neuron<-RunUMAP(sobject.sub.neuron,reduction = "pca",dims = pcs, verbose = F)
+sobject.sub.neuron<-FindNeighbors(sobject.sub.neuron,dims=c(1:10),verbose=F)
+sobject.sub.neuron<-FindClusters(sobject.sub.neuron,verbose=F,resolution = res)
+sobject.sub.neuron$seurat_clusters = sobject.sub.neuron$SCT_snn_res.0.25
+Idents(sobject.sub.neuron) = "seurat_clusters"
+```
+
+Function to print multiple graphs: 
+```{r}
+PrintSeuratGraph = function(namecard = "a",seurat_object = sobject.sub.neuron,graphtype = "feature",feature = NULL,group = NULL,split=NULL,cellnames=NULL, label=FALSE){
+  if (!is.null(cellnames)){
+    #Idents(seurat_object) = cellnames[1]
+    #cells = colnames(seurat_object)[Idents(seurat_object) %in% cellnames[1:length(cellnames)]]} 
+    cells = cellnames}
+  else {cells = cellnames}
+  if (graphtype == "feature"){
+    graph = FeaturePlot(seurat_object,features = feature,split.by = split, cells = cells,cols = c("lightyellow","darkred"))
+  }
+  if (graphtype == "violin"){
+    graph = VlnPlot(seurat_object,features = feature, pt.size = 0.1, idents = cellnames[2:length(cellnames)],group.by = group, split.by = split)
+  }
+  if (graphtype == "dim"){
+    graph = DimPlot(seurat_object,cells = cells, group.by = group, split.by = split, label = label)
+  }
+  name = paste0(feature,"_",graphtype,namecard,".eps")
+  graph
+  setEPS()
+  postscript(file.path(dir,Plotfolder,name))
+  print(graph)
+  dev.off()
+}
+```
+Save the clustered dataset. Overwrite the existing, subset dataset. 
+```{r,eval = FALSE}
+save(sobject.sub.neuron,file = file.path(dir,datafolder,paste0(project,"_",iterationname,".RData")))
+```
+
+Block to print multiple graphs: 
+```{r}
+Plotfolder = "Plots/Neuron subset"
+DefaultAssay(sobject.sub.neuron) = "RNA"
+
+name = paste0(project,"_",iterationname)
+groups = c("genotype", "neurotype", "neurotype_general", "seurat_clusters", "microanatomy")
+#note - added neurotype, neurotype_general from below
+
+#dim plots for clustering (used neurotype_general in paper)
+for(group in groups){
+  PrintSeuratGraph(namecard = paste0(name,"_labeled_"),graphtype = "dim",group = group, feature = group, label = TRUE)
+}
+```
+
+```{r}
+#Edit this part carefully. You can add any number of types. Each cluster can only be one type. 
+
+type0 = c(-1)
+name0 = "Excitatory_1"
+type1 = c(0)
+name1 = "Excitatory_2"
+type2 = c(1)
+name2 = "Excitatory_3"
+type3 = c(2)
+name3 = "Excitatory_4"
+type4 = c(3)
+name4 = "Excitatory_5"
+type5 = c(4)
+name5 = "Inhibitory_1"
+type6 = c(5)
+name6 = "Excitatory_6"
+type7 = c(6)
+name7 = "Excitatory_7"
+type8 = c(7)
+name8 = "Inhibitory_2"
+type9 = c(8)
+name9 = "Inhibitory_3"
+type10 = c(9)
+name10 = "Inhibitory_4"
+type11 = c(10)
+name11 = "Excitatory_8"
+
+#Initialize the cluster levels as a vector and replace the cluster levels with the appropriate name. 
+clusters = as.factor(sobject.sub.neuron$seurat_clusters)
+type = levels(clusters)
+type[type0+2] = name0
+type[type1+2] = name1
+type[type2+2] = name2
+type[type3+2] = name3
+type[type4+2] = name4
+type[type5+2] = name5
+type[type6+2] = name6
+type[type7+2] = name7
+type[type8+2] = name8
+type[type9+2] = name9
+type[type10+2] = name10
+type[type11+2] = name11
+
+levels(clusters) = type
+
+#Add a metadata column
+sobject.sub.neuron$neurotype = clusters
+
+#check the celltype assignment for accuracy
+table(sobject.sub.neuron$neurotype,sobject.sub.neuron$seurat_clusters)
+
+#add a metadata column labelling each cluster
+sobject.sub.neuron$neurotypecluster = paste0(sobject.sub.neuron$neurotype,"-",sobject.sub.neuron$seurat_clusters)
+Idents(sobject.sub.neuron) = "neurotype"
+
+#add new metadatacolumn for excitatory vs. inhibitory
+type_general = type
+type_general[grep("Excitatory", type_general)] = "Excitatory"
+type_general[grep("Inhibitory", type_general)] = "Inhibitory"
+
+levels(clusters) = type_general
+
+#Add a metadata column
+sobject.sub.neuron$neurotype_general = clusters
+
+#check the celltype assignment for accuracy
+table(sobject.sub.neuron$neurotype_general,sobject.sub.neuron$seurat_clusters)
+```
+Save the clustered dataset with neurotype labels. Overwrite the existing, clustered dataset. 
+```{r,eval = FALSE}
+save(sobject.sub.neuron,file = file.path(dir,datafolder,paste0(project,"_",iterationname,".RData")))
+```
+
+
+Save the tree
+```{r}
+Idents(sobject.sub.neuron) = "seurat_clusters"
+sobject.sub.neuron= BuildClusterTree(sobject.sub.neuron,dims = pcs)
+tree = sobject.sub.neuron@tools$BuildClusterTree
+setEPS()
+postscript(file.path(dir,"Trees",paste0(project,"_",iterationname,"_tree.eps")))
+plot.phylo(tree, use.edge.length = T, direction = "rightwards")
+dev.off()
+```
+#IFNg score
+#Code from NM
+#Data from https://pubmed.ncbi.nlm.nih.gov/37100211/
+```{r}
+##Minimum fold change (i.e. 1.15 = 15% increase)
+minfc = 1.5
+#Max adj. p value
+alpha = 0.05
+
+##get DEG data into table
+file = "Hobson BBI 2023 Bulk RNAseq DEGs.csv"
+de_path = file.path(dir, "Data/Other")
+defile = file.path(de_path, file)
+comparison = "Neurons_Saline vs IFNg" #Comparison being made (must match file names)
+de = read.csv(defile,stringsAsFactors = F) #any spreadsheet with gene symbols or other identifiers
+colnames(de)[2] = "Gene"
+
+#create new dataframes of only NeuN+ data at 72h
+NeuN.DEG.72h = de[which(de$Contrast=="NeuPos_IFN-v-Sal_72h"),]
+
+Plotfolder = "Plots/Neuron Subset/module score/72h"
+
+##parse into "up" vs. "down" (with statistics)
+colorkeysup.72h = NeuN.DEG.72h$Gene[NeuN.DEG.72h$log2FoldChange > log2(minfc) & NeuN.DEG.72h$padj < alpha]
+colorkeysup.72h = colorkeysup.72h[!is.na(colorkeysup.72h)] #removes any genes without an annotation "NA"
+
+#edit topIFNgenes to only include genes in sobject
+topIFNgenes_neuro = colorkeysup.72h[colorkeysup.72h %in% rownames(GetAssayData(sobject.sub.neuron,slot = "data"))]
+
+
+##Module Feature Score##
+#convert topIFNgenes into a list with length=1
+topIFNgeneslist = list()
+topIFNgeneslist[[1]] = topIFNgenes_neuro
+length(topIFNgeneslist) #check if length is 1
+topIFNgeneslist[[1]] #check if all genes show up
+
+sobject.sub.neuron = AddModuleScore(sobject.sub.neuron,features = topIFNgeneslist, name = "IFNgModuleScore") #adds IFNgModuleScore to your sobject as a new metadata category
+
+##### total #####
+p1 = VlnPlot(sobject.sub.neuron, "IFNgModuleScore1", group.by = "genotype")
+p1$data$ident <- factor(x = p1$data$ident, levels = c("WT", "cKO_Cxcl12"))
+name = paste0(project, iterationname, "_IFNgModuleScore1.eps")
+
+setEPS()
+postscript(file.path(dir,Plotfolder,name), width=6)
+print(p1)
+dev.off()
+
+  #sig
+sobject_metadata = data.frame(sobject.sub.neuron@meta.data) #creates dataframe of metadata in sobject
+wilcox.test(sobject_metadata$IFNgModuleScore1 ~ sobject_metadata$genotype, conf.int = T)
+
+##### by neurotype (excitatory vs. inhibitory) #####
+p2 = VlnPlot(sobject.sub.neuron, features = "IFNgModuleScore1", group.by = "neurotype_general", split.by = "genotype", split.plot=T)
+p2$data$split <- factor(x = p2$data$split, levels = c("WT", "cKO_Cxcl12"))
+name = paste0(project, iterationname, "_IFNgModuleScore1_split.eps")
+
+setEPS()
+postscript(file.path(dir,Plotfolder,name), width=6)
+print(p2)
+dev.off()
+
+#sig
+install.packages("coin")
+library(coin)
+
+sobject_metadata.mod = sobject_metadata
+sobject_metadata.mod$genotype = as.factor(sobject_metadata.mod$genotype)
+sobject_metadata.mod$neurotype_general = as.factor(sobject_metadata.mod$neurotype_general)
+
+# Apply wilcox_test separately for each neuron type
+results_list <- lapply(split(sobject_metadata.mod, sobject_metadata.mod$neurotype_general), function(subset_data) {
+  test <- wilcox_test(IFNgModuleScore1 ~ genotype | neurotype_general, data = subset_data)
+  data.frame(
+    Neurotype = unique(subset_data$neurotype_general),
+    Statistic = statistic(test),
+    PValue = pvalue(test)
+  )
+})
+
+# Convert results to a data frame
+results_df <- do.call(rbind, results_list)
+
+# Adjust p-values for multiple comparisons
+results_df$AdjustedPValue <- p.adjust(results_df$PValue, method = "fdr")
+```
+
+***~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~***
+Cxcl12: compare Cxcl12 cKO vs. WT fibroblasts for
+-all neuron clusters together
+-each neuron subtype individually
+***~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~***
+```{r}
+Plotfolder = "Plots/Neuron subset/volcano"
+groups = c("NULL", "Excitatory", "Inhibitory")
+clusters = levels(as.factor(sobject.sub.neuron$neurotype_general))
+#manual assignment
+group_names=c("all", clusters[1], clusters[2])
+Idents(sobject.sub.neuron) = "neurotype_general"
+
+#WT vs. cKO
+for(group in groups){
+  group_name = group_names[which(groups == group)]
+  print(paste0("Finding markers (WT vs. cKO) for: ", group_name))
+
+  markers = FindMarkers(
+    sobject.sub.neuron,
+    group.by = "genotype",
+    ident.1 = "cKO_Cxcl12",
+    ident.2 = "WT",
+    subset.ident = if(group_name == "all"){NULL} else{group}) #either cluster of interest or all clusters together
+  
+  write.csv(markers,file = file.path(dir,"Spreadsheets/WT_vs_cKO/Neurons",paste0(project, "_", iterationname, "_cluster-", group_name, "_wt-vs-cxcl12-cKO_markers.csv")))
+}
+```
+
+***GENE SET TESTING**
+https://sbc.shef.ac.uk/prostate-bioinformatics/rna-seq-gene-set-testing.nb.html
+
+```{r}
+Plotfolder = "Plots/Neuron Subset/GO"
+
+plots = list()
+names = list()
+i=1
+
+# create list of all genes
+all_genes = rownames(sobject.sub.neuron)
+  
+group_name = "all"
+
+defile = paste0(project, "_", iterationname, "_cluster-", group_name, "_wt-vs-cxcl12-cKO_markers.csv")
+de_wtvscKO = read.csv(file.path(dir,"Spreadsheets/WT_vs_cKO/Neurons", defile),stringsAsFactors = F) #any   spreadsheet with gene symbols or other identifiers
+decko = de_wtvscKO[de_wtvscKO$avg_log2FC>0,]
+dewt = de_wtvscKO[de_wtvscKO$avg_log2FC<0,]
+
+group_name = "Excitatory"
+
+defile = paste0(project, "_", iterationname, "_cluster-", group_name, "_wt-vs-cxcl12-cKO_markers.csv")
+de_wtvscKO = read.csv(file.path(dir,"Spreadsheets/WT_vs_cKO/Neurons", defile),stringsAsFactors = F) #any   spreadsheet with gene symbols or other identifiers
+deckoexcit = de_wtvscKO[de_wtvscKO$avg_log2FC>0,]
+dewtexcit = de_wtvscKO[de_wtvscKO$avg_log2FC<0,]
+
+group_name = "Inhibitory"
+
+defile = paste0(project, "_", iterationname, "_cluster-", group_name, "_wt-vs-cxcl12-cKO_markers.csv")
+de_wtvscKO = read.csv(file.path(dir,"Spreadsheets/WT_vs_cKO/Neurons", defile),stringsAsFactors = F) #any   spreadsheet with gene symbols or other identifiers
+deckoinhib = de_wtvscKO[de_wtvscKO$avg_log2FC>0,]
+dewtinhib = de_wtvscKO[de_wtvscKO$avg_log2FC<0,]
+
+comparison_delist = list(decko, dewt, deckoexcit, dewtexcit, deckoinhib, dewtinhib)
+clusters_named = c("cKO", "WT", "cKO_Excitatory", "WT_Excitatory", "cKO_Inhibitory", "WT_Inhibitory")
+
+for(cluster in clusters_named){
+
+  print(paste0("Iteration: ", cluster))
+  name = paste0(project, "_", iterationname, "_", cluster)
+  graphname = cluster
+    
+  de = comparison_delist[[which(clusters_named == cluster)]]     # get index of delist in     "comparison_delist" by subtracting numeric clusters to get remaining 4
+  sig_de_genes = de[(de$p_val_adj < 0.05),][,1]
+  
+  #enrichGO
+  
+  enrich_go <- enrichGO(
+    gene= sig_de_genes,
+    OrgDb = org.Mm.eg.db,
+    keyType = "SYMBOL",
+    ont = c("ALL"),
+    universe = all_genes,
+    qvalueCutoff = 0.05,
+    readable=TRUE
+  )
+  
+  empty = FALSE
+  if(is.null(enrich_go)){ #WT SAM empty
+    empty=TRUE
+    }
+  else{ 
+    num_enriched = length(enrich_go@result$ID)}
+    if(num_enriched == 0){
+      empty = TRUE
+      print(paste0(cluster, " is empty"))
+      p1 = p2 = p3 = "No terms enriched"
+    } 
+    else print(paste0(cluster, " enriched: ", num_enriched))
+  
+  if(empty == FALSE){
+    p1 = dotplot(enrich_go, showCategory = 20, font.size = 8) + ggtitle(graphname) + theme(plot.title = element_text(hjust = 0.5))
+
+    name1 = paste0(name, "_GO_enrich_dotplot.eps")
+    plots[[i]] = p1
+    names[[i]] = name1
+    i = i+1
+
+    p2 = barplot(enrich_go, showCategory = 20, font.size = 8) + ggtitle(graphname) + theme(plot.title = element_text(hjust = 0.5))
+    name2 = paste0(name, "_GO_enrich_barplot.eps")
+    plots[[i]] = p2
+    names[[i]] = name2
+    i = i+1
+  
+    p3 = dotplot(enrich_go, split="ONTOLOGY", font.size = 8) + facet_grid(ONTOLOGY~., scale="free")  + ggtitle(graphname) + theme(plot.title = element_text(hjust = 0.5))
+    name3 = paste0(name, "_GO_enrich_dotplot_split.eps")
+    plots[[i]] = p3
+    names[[i]] = name3
+    i = i+1
+  }
+  
+  print(paste0("Success: ", cluster, "       i: ", i))
+}
+
+for(i in 1:length(plots)){
+  plot = plots[[i]]
+  name = names[[i]]
+
+  setEPS()
+  postscript(file.path(dir,Plotfolder,name), width = 6, height = 8)
+  print(plot + theme(axis.text.y = element_text(size = 12)))
+  dev.off()
+}
+```
+
+# Note - used for barplots (see 3_BarPlots.Rmd)
+```{r}
+#add neurotype to total sobject
+#load(file.choose) #load total sobject
+
+celltype = as.character(sobject$celltype)
+names(celltype) = as.character(colnames(sobject))
+
+celltypecluster = as.character(sobject$celltypecluster)
+names(celltypecluster) = as.character(colnames(sobject))
+
+neurotype = as.character(sobject.sub.neuron$neurotype)
+names(neurotype) = as.character(colnames(sobject.sub.neuron))
+
+neurotype_general = as.character(sobject.sub.neuron$neurotype_general)
+names(neurotype_general) = as.character(colnames(sobject.sub.neuron))
+
+for(cell in names(celltype)){
+  if(cell %in% names(neurotype)){
+      index_cell = which(names(celltype) == cell)
+      index_neuro = which(names(neurotype) == cell)
+      celltype[index_cell] = paste0("Neuron_", neurotype[index_neuro])
+      celltypecluster[index_cell] = paste0("Neuron_general_", neurotype_general[index_neuro])
+  }
+}
+
+sobject$neurotype = celltype
+sobject$neurotype_general = celltypecluster
+
+iterationname = "final"
+
+datafolder = "Data/Seurat"
+save(sobject,file = file.path(dir,datafolder,paste0(project,"_",iterationname,".RData")))
+```

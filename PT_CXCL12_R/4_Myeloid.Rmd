@@ -1,0 +1,458 @@
+---
+atitle: "4_Myeloid"
+output: html_document
+date: "2025-02-03"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+library(ape)
+library(cowplot)
+library(Matrix)
+library(MAST)
+#install.packages('EnhancedVolcano')
+library(EnhancedVolcano)
+library(dplyr)
+
+library("devtools")
+#devtools::install_github("powellgenomicslab/Nebulosa")
+library("Nebulosa")
+#install.packages("scCustomize")
+library(scCustomize)
+
+#BiocManager::install("goseq")
+library(goseq)
+#BiocManager::install("TxDb.Mmusculus.UCSC.mm10.ensGene")
+library(TxDb.Mmusculus.UCSC.mm10.ensGene)
+#BiocManager::install("org.Mm.eg.db")
+library(org.Mm.eg.db)
+#BiocManager::install("clusterProfiler")
+library(clusterProfiler)
+
+library(openxlsx)
+```
+
+#Load immune seurat object
+```{r}
+load(file.choose())
+```
+
+```{r}
+#Specify your preferred directory for all input + output
+dir = "/Users/nathanewing-crystal/Ari Molofsky Lab Dropbox/Ari Molofsky Lab Team Folder/Nathan Ewing-Crystal/RNASeq/Lesion snRNASeq 3 Cxcl12/seurat"
+#Specify exactly where your seurat files live
+datafolder = "Data/Seurat/Myeloid Subset"
+
+project<-"cxcl12_lesion_snRNASeq"  
+
+#set up folders
+QCfolder = "QC"
+Plotfolder = "Plots/Myeloid subset"
+
+#Decide whether to use SCtransform (can take a long time with big datasets; generally recommended)
+sct = TRUE
+
+#You can add in housekeeping genes if you want them to be scaled always; otherwise set to "NULL"
+add.genes = NULL
+
+#How many genes do you want scaled to use for UMAP/clustering? 
+ngenes = 6000
+
+#Which principal components do you want to calculate on? This is a default setting, change if one of the pc's is for something you think is a technical error (i.e. HSP, RP, etc)
+pcs = c(1:30)
+
+#Choose what to regress out - could be age, sex, or any metadata column
+regress = c("nCount_RNA","percent.mito")
+
+#clustering resolution; the last number will be saved as "seurat_clusters" in metadata
+res = c(1.5,1.0,0.5, 0.4, 0.35, 0.3, 0.25, 0.2, 0.15, 0.1)
+
+#metadata dimensions you want to cluster on
+dims = c("seurat_clusters","sample", "subsample", "timepoint","genotype", "microanatomy")
+
+#make a unique name; maybe this is the celltype you've already subset, or the age you're looking at, etc.
+iterationname = "myeloid_reclustered"
+
+#Establish cutoffs for heatmaps
+pval = 1e-3 #max p-value for significance
+lfc = 0.2 #minimum log fold change
+minpct = 0.05 #if you want to subset by percent cells in that cluster expressing the gene
+maxpct = 1
+single = F #should each gene be a marker of a single cluster only
+hgenes = 3 #how many genes should be in the heatmap per cluster
+ncells = 100 #max # of cells per heatmap column
+column = "seurat_clusters" #division you care about
+```
+
+Find variable features, normalize, scale, run PCA, clustering, umap
+The following is the standard method of normalization and scaling. Interchangeable with the next chunk. Run both, you should have already specified which to use with "sct = T or F". Will take 5-20 minutes to run. 
+```{r,results = 'hide',eval = FALSE}
+if (!sct){
+  sobject.sub.myeloid <- NormalizeData(sobject.sub.myeloid,normalization.method = "LogNormalize", scale.factor = 10000)
+  sobject.sub.myeloid<-FindVariableFeatures(sobject.sub.myeloid, selection.method = "vst", nfeatures = ngenes)
+  
+  all.genes<-rownames(sobject.sub.myeloid)
+  var.genes = VariableFeatures(sobject.sub.myeloid)
+  add.genes = add.genes[!add.genes %in% var.genes]
+  
+  any(add.genes %in% var.genes)
+  scalegenes = c(var.genes,add.genes)
+  VariableFeatures(sobject.sub.myeloid) = scalegenes
+  sobject.sub.myeloid<-ScaleData(sobject.sub.myeloid,features = VariableFeatures(sobject.sub.myeloid), vars.to.regress = regress)
+}
+```
+
+Alternative: SCTransform (great for smaller datasets)
+```{r, results='hide',eval = FALSE}
+if (sct){
+  sobject.sub.myeloid <- SCTransform(sobject.sub.myeloid, vars.to.regress = regress, verbose = FALSE,variable.features.n = ngenes,conserve.memory = T)
+}
+```
+
+Show most variable genes
+```{r}
+labels <- c(head(VariableFeatures(sobject.sub.myeloid),10),add.genes)
+plot1 = VariableFeaturePlot(sobject.sub.myeloid)
+LabelPoints(plot=plot1, points = labels, repel = F, xnudge = 0.1, ynudge = 0.5)
+```
+
+Run PCA analysis and show elbow plot
+```{r}
+sobject.sub.myeloid <- RunPCA(sobject.sub.myeloid,features = VariableFeatures(sobject.sub.myeloid),npcs = 50, verbose = FALSE)
+ElbowPlot(sobject.sub.myeloid,ndims = 50, reduction = "pca")
+print(sobject.sub.myeloid[["pca"]], dims = 1:20, nfeatures = 5)
+```
+
+Once you are satisfied with pc's, run clustering: 
+```{r}
+sobject.sub.myeloid<-RunUMAP(sobject.sub.myeloid,reduction = "pca",dims = pcs, verbose = F)
+sobject.sub.myeloid<-FindNeighbors(sobject.sub.myeloid,dims=c(1:10),verbose=F)
+sobject.sub.myeloid<-FindClusters(sobject.sub.myeloid,verbose=F,resolution = res)
+sobject.sub.myeloid$seurat_clusters = sobject.sub.myeloid$SCT_snn_res.0.25
+Idents(sobject.sub.myeloid) = "seurat_clusters"
+```
+
+Function to print multiple graphs: 
+```{r}
+PrintSeuratGraph = function(namecard = "a",seurat_object = sobject.sub.myeloid,graphtype = "feature",feature = NULL,group = NULL,split=NULL,cellnames=NULL, label=FALSE){
+  if (!is.null(cellnames)){
+    #Idents(seurat_object) = cellnames[1]
+    #cells = colnames(seurat_object)[Idents(seurat_object) %in% cellnames[1:length(cellnames)]]} 
+    cells = cellnames}
+  else {cells = cellnames}
+  if (graphtype == "feature"){
+    graph = FeaturePlot(seurat_object,features = feature,split.by = split, cells = cells,cols = c("lightyellow","darkred"))
+  }
+  if (graphtype == "violin"){
+    graph = VlnPlot(seurat_object,features = feature, pt.size = 0.1, idents = cellnames[2:length(cellnames)],group.by = group, split.by = split)
+  }
+  if (graphtype == "dim"){
+    graph = DimPlot(seurat_object,cells = cells, group.by = group, split.by = split, label = label)
+  }
+  name = paste0(feature,"_",graphtype,namecard,".eps")
+  graph
+  setEPS()
+  postscript(file.path(dir,Plotfolder,name))
+  print(graph)
+  dev.off()
+}
+```
+Save the clustered dataset. Overwrite the existing, subset dataset. 
+```{r,eval = FALSE}
+save(sobject.sub.myeloid,file = file.path(dir,datafolder,paste0(project,"_",iterationname,".RData")))
+```
+
+Block to print multiple graphs: 
+```{r}
+Plotfolder = "Plots/Myeloid Subset"
+DefaultAssay(sobject.sub.myeloid) = "RNA"
+
+name = paste0(project,"_",iterationname)
+groups = c("genotype", "immunetype", "immunetypecluster", "seurat_clusters", "microanatomy")
+#note - added immunetype, immunetypecluster from below
+
+#dim plots for clustering
+for(group in groups){
+  PrintSeuratGraph(namecard = name,graphtype = "dim",group = group, feature = group)
+  PrintSeuratGraph(namecard = paste0(name,"_labeled_"),graphtype = "dim",group = group, feature = group, label = TRUE)
+  PrintSeuratGraph(namecard = paste0(name, "_split_"), graphtype = "dim", feature = group, split=group)
+}
+
+graph = DimPlot(sobject.sub.myeloid, group.by = "microanatomy", label=TRUE) + ggplot2::theme(legend.position = "none")
+setEPS()
+postscript(file.path(dir,Plotfolder,"dimplot_nolegend_microanatomy.eps"))
+print(graph)
+dev.off()
+```
+
+```{r}
+#Edit this part carefully. You can add any number of types. Each cluster can only be one type. 
+
+type0 = c(-1)
+name0 = "Microglia/DAM"
+type1 = c(0)
+name1 = "SAM"
+type2 = c(1)
+name2 = "PVM/BAM"
+type3 = c(2)
+name3 = "ECM_Mac"
+type4 = c(3)
+name4 = "Monocytes_DCs_1"
+type5 = c(4)
+name5 = "Monocytes_DCs_2"
+
+#Initialize the cluster levels as a vector and replace the cluster levels with the appropriate name. 
+clusters = as.factor(sobject.sub.myeloid$seurat_clusters)
+type = levels(clusters)
+type[type0+2] = name0
+type[type1+2] = name1
+type[type2+2] = name2
+type[type3+2] = name3
+type[type4+2] = name4
+type[type5+2] = name5
+
+levels(clusters) = type
+
+#Add a metadata column
+sobject.sub.myeloid$immunetype = clusters
+
+#check the celltype assignment for accuracy
+table(sobject.sub.myeloid$immunetype,sobject.sub.myeloid$seurat_clusters)
+
+#add a metadata column labelling each cluster
+sobject.sub.myeloid$immunetypecluster = paste0(sobject.sub.myeloid$immunetype,"-",sobject.sub.myeloid$seurat_clusters)
+Idents(sobject.sub.myeloid) = "immunetype"
+```
+Save the clustered dataset with immunetype labels. Overwrite the existing, clustered dataset. 
+```{r,eval = FALSE}
+save(sobject.sub.myeloid,file = file.path(dir,datafolder,paste0(project,"_",iterationname,".RData")))
+```
+
+
+Save the tree
+```{r}
+Idents(sobject.sub.myeloid) = "seurat_clusters"
+sobject.sub.myeloid= BuildClusterTree(sobject.sub.myeloid,dims = pcs)
+tree = sobject.sub.myeloid@tools$BuildClusterTree
+setEPS()
+postscript(file.path(dir,"Trees",paste0(project,"_",iterationname,"_tree.eps")))
+plot.phylo(tree, use.edge.length = T, direction = "rightwards")
+dev.off()
+```
+
+#IFNg score
+#code from Nick Mroz
+```{r}
+IFNgfilepath = "/Users/nathanewing-crystal/Ari Molofsky Lab Dropbox/Ari Molofsky Lab Team Folder/Nathan Ewing-Crystal/RNASeq/Lesion snRNASeq 3 Cxcl12/seurat/Data/Other/" #change your pile path to where the DEG csv is
+IFNgDEGlist = "IFNg_Jerika.csv"
+
+#Read in DEG list
+IFNgDEG = read.csv(file.path(IFNgfilepath,IFNgDEGlist),stringsAsFactors = F)
+
+##Minimum fold change (i.e. 1.15 = 15% increase)
+minfc = 1.5
+#Max adj. p value
+alpha = 0.05
+
+#remove any rows with "NA" in FC or adjusted p value
+IFNgDEG = IFNgDEG[!is.na(IFNgDEG$log2FoldChange),] 
+IFNgDEG = IFNgDEG[!is.na(IFNgDEG$padj),]
+
+topIFNgenes = IFNgDEG$Gene_ID[which(IFNgDEG$log2FoldChange>log2(minfc) & IFNgDEG$padj<alpha)] #vector of gene names that are upregulated above thresholds
+
+#edit topIFNgenes to only include genes in sobject
+topIFNgenes = topIFNgenes[topIFNgenes %in% rownames(GetAssayData(sobject.sub.myeloid,slot = "data"))]
+
+
+##Module Feature Score##
+#convert topIFNgenes into a list with length=1
+topIFNgeneslist = as.list(topIFNgenes)
+topIFNgeneslist[[1]] = topIFNgenes
+topIFNgeneslist = topIFNgeneslist[1]
+length(topIFNgeneslist) #check if length is 1
+topIFNgeneslist[[1]] #check if all genes show up
+
+sobject.sub.myeloid = AddModuleScore(sobject.sub.myeloid,features = topIFNgeneslist, name = "IFNgModuleScore") #adds IFNgModuleScore to your sobject as a new metadata category
+
+p3 = VlnPlot(sobject.sub.myeloid, features = "IFNgModuleScore1", group.by = "microanatomy", split.by = "genotype", split.plot=T)
+p3$data$split <- factor(x = p3$data$split, levels = c("WT", "cKO_Cxcl12"))
+name = paste0(project, iterationname, "_IFNgModuleScore1_split_microanatomy.eps")
+
+setEPS()
+postscript(file.path(dir,Plotfolder,name), width = 6)
+print(p3)
+dev.off()
+
+ #sig
+install.packages("coin")
+library(coin)
+
+sobject_metadata.mod = sobject_metadata
+sobject_metadata.mod$genotype = as.factor(sobject_metadata.mod$genotype)
+sobject_metadata.mod$microanatomy = as.factor(sobject_metadata.mod$microanatomy)
+
+# Apply wilcox_test separately for each myeloid type
+results_list <- lapply(split(sobject_metadata.mod, sobject_metadata.mod$microanatomy), function(subset_data) {
+  test <- wilcox_test(IFNgModuleScore1 ~ genotype | microanatomy, data = subset_data)
+  data.frame(
+    Microanatomy = unique(subset_data$microanatomy),
+    Statistic = statistic(test),
+    PValue = pvalue(test)
+  )
+})
+
+# Convert results to a data frame
+results_df <- do.call(rbind, results_list)
+
+# Adjust p-values for multiple comparisons
+results_df$AdjustedPValue <- p.adjust(results_df$PValue, method = "bonferroni")
+```
+
+Save the clustered dataset with immunetype labels. Overwrite the existing, clustered dataset. 
+```{r,eval = FALSE}
+save(sobject.sub.myeloid,file = file.path(dir,datafolder,paste0(project,"_",iterationname,".RData")))
+```
+
+# Note - used for barplots (see 3_BarPlots.Rmd)
+```{r}
+#add myeloid metadata to total sobject
+#load(file.choose) #load total sobject
+
+celltype = as.character(sobject$celltype)
+names(celltype) = as.character(colnames(sobject))
+
+celltypecluster = as.character(sobject$celltypecluster)
+names(celltypecluster) = as.character(colnames(sobject))
+
+immunetype = as.character(sobject.sub.myeloid$immunetype)
+names(immunetype) = as.character(colnames(sobject.sub.myeloid))
+
+for(cell in names(celltype)){
+  if(cell %in% names(immunetype)){
+      index_cell = which(names(celltype) == cell)
+      index_immune = which(names(immunetype) == cell)
+      celltype[index_cell] = paste0("Myeloid_", immunetype[index_immune])
+  }
+}
+
+
+
+#add myeloid sub.cluster
+#load(file.choose) #load total sobject
+
+celltype = as.character(sobject$celltype)
+names(celltype) = as.character(colnames(sobject))
+
+subcluster = as.character(sobject.sub.myeloid$sub.cluster)
+names(subcluster) = as.character(colnames(sobject.sub.myeloid))
+
+for(cell in names(celltype)){
+  if(cell %in% names(subcluster)){
+      index_cell = which(names(celltype) == cell)
+      index_sub = which(names(subcluster) == cell)
+      celltype[index_cell] = paste0("Myeloid.sub_", subcluster[index_sub])
+  }
+}
+
+sobject$immune.subcluster = celltype
+
+iterationname = "final"
+
+datafolder = "Data/Seurat"
+save(sobject,file = file.path(dir,datafolder,paste0(project,"_",iterationname,".RData")))
+```
+
+# Note - not included in paper but used for identity assignment
+```{r}
+Plotfolder = "Plots/Myeloid Subset/Old Seq Mapping"
+  
+#Map old clusters (NEC127) onto new clusters (NEC292)
+old_markers_path = "/Users/nathanewing-crystal/Ari Molofsky Lab Dropbox/Ari Molofsky Lab Team Folder/Nathan Ewing-Crystal/RNASeq/Lesion snRNASeq/seurat/Spreadsheets/lesion_snRNASeq_immune_reclustered_all_markers.csv"
+old_markers = read.csv(old_markers_path,stringsAsFactors = F)
+
+old_clusters = levels(factor(old_markers$cluster))
+old_cluster_names = c("DAMs", "Macrophage_Ldlrad3", "T-cells_Th1-2", "Macrophage_CD206", "Prolif", "Macrophage_ECM", "Monocytes_DCs", "Microglia", "T-cells_Th17", "DCs", "Osteoclasts")
+names(old_clusters) = old_cluster_names
+
+plots = list()
+
+for(i in 1:length(old_clusters)){
+  old_cluster = old_clusters[i]
+  cluster_name = old_cluster_names[i]
+  old_genes = old_markers[old_markers$cluster == old_cluster & old_markers$avg_log2FC > 0,]$gene
+  #convert  into a list with length=1
+  old_genes_list = list()
+  old_genes_list[[1]] = old_genes
+  sobject.sub.myeloid <- AddModuleScore(
+    sobject.sub.myeloid,
+    old_genes_list,
+    pool = NULL,
+    nbin = 24,
+    ctrl = 100,
+    name = paste0(cluster_name, "_score"),
+    seed = 1,
+    search = TRUE)
+    
+    feature_name = paste0(cluster_name, "_score1")
+    print(VlnPlot(sobject.sub.myeloid, feature_name))
+    #PrintSeuratGraph(namecard = name,graphtype = "violin",feature = feature_name,group = "seurat_clusters")
+}
+
+p1 = VlnPlot(sobject.sub.myeloid, c("DAMs_score1", "Macrophage_Ldlrad3_score1", "Macrophage_CD206_score1", "Prolif_score1", "Macrophage_ECM_score1", "Monocytes_DCs_score1", "DCs_score1", "Microglia_score1", "Osteoclasts_score1"), stack=T, group.by = "immunetype")
+p1$data$ident <- factor(x = p1$data$ident, levels = rev(c("Microglia/DAM", "SAM", "PVM/BAM", "ECM_Mac", "Monocytes_DCs_1", "Monocytes_DCs_2")))
+
+p2 = DotPlot(sobject.sub.myeloid, assay = "RNA", group.by = "immunetype", features = c("DAMs_score1", "Macrophage_Ldlrad3_score1", "Macrophage_CD206_score1", "Prolif_score1", "Macrophage_ECM_score1", "Monocytes_DCs_score1", "DCs_score1", "Microglia_score1", "Osteoclasts_score1"), cols = "RdBu") + theme(axis.text.x = element_text(angle = 90, hjust = 0.95))
+p2$data$id <- factor(x = p2$data$id, levels = rev(c("Microglia/DAM", "SAM", "PVM/BAM", "ECM_Mac", "Monocytes_DCs_1", "Monocytes_DCs_2")))
+
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "myeloid_mapping_old.eps"), width = 10, height = 5)
+p2
+dev.off()
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "myeloid_mapping.eps"), width = 10, height = 5)
+p1
+dev.off()
+```
+
+```{r}
+#subcluster SAMs
+#NOTE - in figures, labelled SAM_0-3 as SAM_1-4
+Idents(sobject.sub.myeloid) = "immunetype"
+sobject.sub.myeloid<- FindSubCluster(
+  sobject.sub.myeloid,
+  cluster = "SAM",
+  graph.name = "SCT_snn",
+  subcluster.name = "sub.cluster",
+  resolution = 0.4,
+  algorithm = 1
+)
+
+iterationname = "myeloid_reclustered_SAM-subclustered"
+Idents(sobject.sub.myeloid) = "sub.cluster"
+Plotfolder = "Plots/Myeloid Subset/Subcluster_SAM"
+
+name = paste0(project,"_",iterationname)
+PrintSeuratGraph(namecard = name,graphtype = "dim",group = "sub.cluster")
+
+genes = c("Itgax", "Mamdc2", "Fabp4", "Cd36", "Gm44993", "Anxa1", "Il7r")
+genes2 = c("Itgax", "Fabp4", "Anxa1", "Il7r", "Ksr2", "Mmp12")
+Idents(sobject.sub.myeloid) = "immunetype"
+p3 = DotPlot(subset(sobject.sub.myeloid, ident = "SAM"), rev(genes2), group.by = "sub.cluster", cols = "RdBu") + theme(axis.text.x = element_text(angle = 90, hjust = 0.95)) + coord_flip()
+
+setEPS()
+postscript(file.path(dir, Plotfolder, paste0(name, "_M1_dot_v2.eps")), width = 5, height = 5)
+p3
+dev.off()
+```
+
+```{r,eval = FALSE}
+save(sobject.sub.myeloid,file = file.path(dir,datafolder,paste0(project,"_",iterationname,".RData")))
+```

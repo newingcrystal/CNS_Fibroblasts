@@ -1,0 +1,260 @@
+---
+title: "6_T"
+author: "Nathan Ewing-Crystal"
+date: "2025-02-08"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+library(ape)
+library(cowplot)
+library(Matrix)
+library(MAST)
+#install.packages('EnhancedVolcano')
+library(EnhancedVolcano)
+library(dplyr)
+
+library("devtools")
+#devtools::install_github("powellgenomicslab/Nebulosa")
+library("Nebulosa")
+#install.packages("scCustomize")
+library(scCustomize)
+
+#BiocManager::install("goseq")
+library(goseq)
+#BiocManager::install("TxDb.Mmusculus.UCSC.mm10.ensGene")
+library(TxDb.Mmusculus.UCSC.mm10.ensGene)
+#BiocManager::install("org.Mm.eg.db")
+library(org.Mm.eg.db)
+#BiocManager::install("clusterProfiler")
+library(clusterProfiler)
+```
+
+#Load T_cell seurat object
+```{r}
+load(file.choose())
+```
+
+```{r}
+#Specify your preferred directory for all input + output
+dir = "/Users/nathanewing-crystal/Ari Molofsky Lab Dropbox/Ari Molofsky Lab Team Folder/Nathan Ewing-Crystal/RNASeq/Lesion snRNASeq 3 Cxcl12/seurat"
+#Specify exactly where your seurat files live
+datafolder = "Data/Seurat/T_cell Subset"
+
+project<-"cxcl12_lesion_snRNASeq"  
+
+#set up folders
+QCfolder = "QC"
+Plotfolder = "Plots/T_cell subset"
+
+#Decide whether to use SCtransform (can take a long time with big datasets; generally recommended)
+sct = TRUE
+
+#You can add in housekeeping genes if you want them to be scaled always; otherwise set to "NULL"
+add.genes = NULL
+
+#How many genes do you want scaled to use for UMAP/clustering? 
+ngenes = 6000
+
+#Which principal components do you want to calculate on? This is a default setting, change if one of the pc's is for something you think is a technical error (i.e. HSP, RP, etc)
+pcs = c(1:30)
+
+#Choose what to regress out - could be age, sex, or any metadata column
+regress = c("nCount_RNA","percent.mito")
+
+#clustering resolution; the last number will be saved as "seurat_clusters" in metadata
+res = c(1.5,1.0,0.5, 0.4, 0.35, 0.3, 0.25, 0.2, 0.15, 0.1)
+
+#metadata dimensions you want to cluster on
+dims = c("seurat_clusters","sample", "subsample", "timepoint","genotype", "microanatomy")
+
+#make a unique name; maybe this is the celltype you've already subset, or the age you're looking at, etc.
+iterationname = "T_cell_reclustered"
+
+#Establish cutoffs for heatmaps
+pval = 1e-3 #max p-value for significance
+lfc = 0.2 #minimum log fold change
+minpct = 0.05 #if you want to subset by percent cells in that cluster expressing the gene
+maxpct = 1
+single = F #should each gene be a marker of a single cluster only
+hgenes = 3 #how many genes should be in the heatmap per cluster
+ncells = 100 #max # of cells per heatmap column
+column = "seurat_clusters" #division you care about
+```
+
+Find variable features, normalize, scale, run PCA, clustering, umap
+The following is the standard method of normalization and scaling. Interchangeable with the next chunk. Run both, you should have already specified which to use with "sct = T or F". Will take 5-20 minutes to run. 
+```{r,results = 'hide',eval = FALSE}
+if (!sct){
+  sobject.sub.t <- NormalizeData(sobject.sub.t,normalization.method = "LogNormalize", scale.factor = 10000)
+  sobject.sub.t<-FindVariableFeatures(sobject.sub.t, selection.method = "vst", nfeatures = ngenes)
+  
+  all.genes<-rownames(sobject.sub.t)
+  var.genes = VariableFeatures(sobject.sub.t)
+  add.genes = add.genes[!add.genes %in% var.genes]
+  
+  any(add.genes %in% var.genes)
+  scalegenes = c(var.genes,add.genes)
+  VariableFeatures(sobject.sub.t) = scalegenes
+  sobject.sub.t<-ScaleData(sobject.sub.t,features = VariableFeatures(sobject.sub.t), vars.to.regress = regress)
+}
+```
+
+Alternative: SCTransform (great for smaller datasets)
+```{r, results='hide',eval = FALSE}
+if (sct){
+  sobject.sub.t <- SCTransform(sobject.sub.t, vars.to.regress = regress, verbose = FALSE,variable.features.n = ngenes,conserve.memory = T)
+}
+```
+
+Show most variable genes
+```{r}
+labels <- c(head(VariableFeatures(sobject.sub.t),10),add.genes)
+plot1 = VariableFeaturePlot(sobject.sub.t)
+LabelPoints(plot=plot1, points = labels, repel = F, xnudge = 0.1, ynudge = 0.5)
+```
+
+Run PCA analysis and show elbow plot
+```{r}
+sobject.sub.t <- RunPCA(sobject.sub.t,features = VariableFeatures(sobject.sub.t),npcs = 50, verbose = FALSE)
+ElbowPlot(sobject.sub.t,ndims = 50, reduction = "pca")
+print(sobject.sub.t[["pca"]], dims = 1:20, nfeatures = 5)
+```
+
+Once you are satisfied with pc's, run clustering: 
+```{r}
+sobject.sub.t<-RunUMAP(sobject.sub.t,reduction = "pca",dims = pcs, verbose = F)
+sobject.sub.t<-FindNeighbors(sobject.sub.t,dims=c(1:10),verbose=F)
+sobject.sub.t<-FindClusters(sobject.sub.t,verbose=F,resolution = res)
+sobject.sub.t$seurat_clusters = sobject.sub.t$SCT_snn_res.0.5
+Idents(sobject.sub.t) = "seurat_clusters"
+```
+
+Function to print multiple graphs: 
+```{r}
+PrintSeuratGraph = function(namecard = "a",seurat_object = sobject.sub.t,graphtype = "feature",feature = NULL,group = NULL,split=NULL,cellnames=NULL, label=FALSE, order=FALSE){
+  if (!is.null(cellnames)){
+    #Idents(seurat_object) = cellnames[1]
+    #cells = colnames(seurat_object)[Idents(seurat_object) %in% cellnames[1:length(cellnames)]]} 
+    cells = cellnames}
+  else {cells = cellnames}
+  if (graphtype == "feature"){
+    graph = FeaturePlot(seurat_object,features = feature,split.by = split, cells = cells,order=order,cols = c("lightyellow","darkred"))
+  }
+  if (graphtype == "violin"){
+    graph = VlnPlot(seurat_object,features = feature, pt.size = 0.1, idents = cellnames[2:length(cellnames)],group.by = group, split.by = split)
+  }
+  if (graphtype == "dim"){
+    graph = DimPlot(seurat_object,cells = cells, group.by = group, split.by = split, label = label)
+  }
+  name = paste0(feature,"_",graphtype,namecard,".eps")
+  graph
+  setEPS()
+  postscript(file.path(dir,Plotfolder,name))
+  print(graph)
+  dev.off()
+}
+```
+Save the clustered dataset. Overwrite the existing, subset dataset. 
+```{r,eval = FALSE}
+save(sobject.sub.t,file = file.path(dir,datafolder,paste0(project,"_",iterationname,".RData")))
+```
+
+Block to print multiple graphs: 
+```{r}
+Plotfolder = "Plots/T_cell Subset"
+DefaultAssay(sobject.sub.t) = "RNA"
+name = paste0(project,"_",iterationname)
+
+genes_lineage  = c("Cd4", "Cd8a", "Ifng", "Tbx21", "Rorc", "Il17a")
+p1 = DotPlot(sobject.sub.t, assay = "RNA", features = genes_lineage, cols = "RdBu") + theme(axis.text.x = element_text(angle = 90, hjust = 0.95)) + coord_flip()
+setEPS()
+postscript(file.path(dir,"DotPlots",paste0(name, "dotplot.eps")), width = 4, height = 4)
+print(p1)
+dev.off()
+```
+
+```{r}
+#Edit this part carefully. You can add any number of types. Each cluster can only be one type. 
+
+type0 = c(-1)
+name0 = "abT" # labeled as "Type 1" in paper
+type1 = c(0)
+name1 = "gdT" # Type 17 (including gdT) - labeled as "type 17" in paper
+
+
+#Initialize the cluster levels as a vector and replace the cluster levels with the appropriate name. 
+clusters = as.factor(sobject.sub.t$seurat_clusters)
+type = levels(clusters)
+type[type0+2] = name0
+type[type1+2] = name1
+
+levels(clusters) = type
+
+#Add a metadata column
+sobject.sub.t$ttype = clusters
+
+#check the celltype assignment for accuracy
+table(sobject.sub.t$ttype,sobject.sub.t$seurat_clusters)
+
+#add a metadata column labelling each cluster
+sobject.sub.t$ttypecluster = paste0(sobject.sub.t$ttype,"-",sobject.sub.t$seurat_clusters)
+Idents(sobject.sub.t) = "ttype"
+```
+Save the clustered dataset with ttype labels. Overwrite the existing, clustered dataset. 
+```{r,eval = FALSE}
+save(sobject.sub.t,file = file.path(dir,datafolder,paste0(project,"_",iterationname,".RData")))
+```
+
+
+Save the tree
+```{r}
+Idents(sobject.sub.t) = "seurat_clusters"
+sobject.sub.t= BuildClusterTree(sobject.sub.t,dims = pcs)
+tree = sobject.sub.t@tools$BuildClusterTree
+setEPS()
+postscript(file.path(dir,"Trees",paste0(project,"_",iterationname,"_tree.eps")))
+plot.phylo(tree, use.edge.length = T, direction = "rightwards")
+dev.off()
+```
+
+Save the clustered dataset with ttype labels. Overwrite the existing, clustered dataset. 
+```{r,eval = FALSE}
+save(sobject.sub.t,file = file.path(dir,datafolder,paste0(project,"_",iterationname,".RData")))
+```
+
+# Note - used for barplots (see 3_BarPlots.Rmd)
+```{r}
+#add T_cell metadata to total sobject
+#load(file.choose) #load total sobject
+
+celltype = as.character(sobject$celltype)
+names(celltype) = as.character(colnames(sobject))
+
+celltypecluster = as.character(sobject$celltypecluster)
+names(celltypecluster) = as.character(colnames(sobject))
+
+ttype = as.character(sobject.sub.t$ttype)
+names(ttype) = as.character(colnames(sobject.sub.t))
+
+for(cell in names(celltype)){
+  if(cell %in% names(ttype)){
+      index_cell = which(names(celltype) == cell)
+      index_t = which(names(ttype) == cell)
+      celltype[index_cell] = paste0("T_cell_", ttype[index_t])
+  }
+}
+
+sobject$ttype = celltype
+
+iterationname = "final"
+
+datafolder = "Data/Seurat"
+save(sobject,file = file.path(dir,datafolder,paste0(project,"_",iterationname,".RData")))
+```

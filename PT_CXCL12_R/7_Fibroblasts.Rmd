@@ -1,0 +1,368 @@
+---
+title: "7_Fibroblasts"
+author: "Nathan Ewing-Crystal"
+date: "2025-02-08"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+library(ape)
+library(cowplot)
+library(Matrix)
+library(MAST)
+#install.packages('EnhancedVolcano')
+library(EnhancedVolcano)
+library(dplyr)
+
+library("devtools")
+#devtools::install_github("powellgenomicslab/Nebulosa")
+library("Nebulosa")
+#install.packages("scCustomize")
+library(scCustomize)
+
+#BiocManager::install("goseq")
+library(goseq)
+#BiocManager::install("TxDb.Mmusculus.UCSC.mm10.ensGene")
+library(TxDb.Mmusculus.UCSC.mm10.ensGene)
+#BiocManager::install("org.Mm.eg.db")
+library(org.Mm.eg.db)
+#BiocManager::install("clusterProfiler")
+library(clusterProfiler)
+
+library("dunn.test") #needed for Dunn's correction to Kruskal-Wallis test
+```
+
+#Load Fibroblast seurat object
+```{r}
+load(file.choose())
+```
+
+```{r}
+#Specify your preferred directory for all input + output
+dir = "/Users/nathanewing-crystal/Ari Molofsky Lab Dropbox/Ari Molofsky Lab Team Folder/Nathan Ewing-Crystal/RNASeq/Lesion snRNASeq 3 Cxcl12/seurat"
+#Specify exactly where your seurat files live
+datafolder = "Data/Seurat/Fibroblast Subset"
+
+project<-"cxcl12_lesion_snRNASeq"  
+
+#set up folders
+QCfolder = "QC"
+Plotfolder = "Plots/Fibroblast subset"
+
+#Decide whether to use SCtransform (can take a long time with big datasets; generally recommended)
+sct = TRUE
+
+#You can add in housekeeping genes if you want them to be scaled always; otherwise set to "NULL"
+add.genes = NULL
+
+#How many genes do you want scaled to use for UMAP/clustering? 
+ngenes = 6000
+
+#Which principal components do you want to calculate on? This is a default setting, change if one of the pc's is for something you think is a technical error (i.e. HSP, RP, etc)
+pcs = c(1:30)
+
+#Choose what to regress out - could be age, sex, or any metadata column
+regress = c("nCount_RNA","percent.mito")
+
+#clustering resolution; the last number will be saved as "seurat_clusters" in metadata
+res = c(1.5,1.0,0.5, 0.4, 0.35, 0.3, 0.25, 0.2, 0.15, 0.1)
+
+#metadata dimensions you want to cluster on
+dims = c("seurat_clusters","sample", "subsample", "timepoint","genotype", "microanatomy")
+
+#make a unique name; maybe this is the celltype you've already subset, or the age you're looking at, etc.
+iterationname = "Fibroblast_reclustered"
+
+#Establish cutoffs for heatmaps
+pval = 1e-3 #max p-value for significance
+lfc = 0.2 #minimum log fold change
+minpct = 0.05 #if you want to subset by percent cells in that cluster expressing the gene
+maxpct = 1
+single = F #should each gene be a marker of a single cluster only
+hgenes = 3 #how many genes should be in the heatmap per cluster
+ncells = 100 #max # of cells per heatmap column
+column = "seurat_clusters" #division you care about
+```
+
+Find variable features, normalize, scale, run PCA, clustering, umap
+The following is the standard method of normalization and scaling. Interchangeable with the next chunk. Run both, you should have already specified which to use with "sct = T or F". Will take 5-20 minutes to run. 
+```{r,results = 'hide',eval = FALSE}
+if (!sct){
+  sobject.sub.fib <- NormalizeData(sobject.sub.fib,normalization.method = "LogNormalize", scale.factor = 10000)
+  sobject.sub.fib<-FindVariableFeatures(sobject.sub.fib, selection.method = "vst", nfeatures = ngenes)
+  
+  all.genes<-rownames(sobject.sub.fib)
+  var.genes = VariableFeatures(sobject.sub.fib)
+  add.genes = add.genes[!add.genes %in% var.genes]
+  
+  any(add.genes %in% var.genes)
+  scalegenes = c(var.genes,add.genes)
+  VariableFeatures(sobject.sub.fib) = scalegenes
+  sobject.sub.fib<-ScaleData(sobject.sub.fib,features = VariableFeatures(sobject.sub.fib), vars.to.regress = regress)
+}
+```
+
+Alternative: SCTransform (great for smaller datasets)
+```{r, results='hide',eval = FALSE}
+if (sct){
+  sobject.sub.fib <- SCTransform(sobject.sub.fib, vars.to.regress = regress, verbose = FALSE,variable.features.n = ngenes,conserve.memory = T)
+}
+```
+
+Show most variable genes
+```{r}
+labels <- c(head(VariableFeatures(sobject.sub.fib),10),add.genes)
+plot1 = VariableFeaturePlot(sobject.sub.fib)
+LabelPoints(plot=plot1, points = labels, repel = F, xnudge = 0.1, ynudge = 0.5)
+```
+
+Run PCA analysis and show elbow plot
+```{r}
+sobject.sub.fib <- RunPCA(sobject.sub.fib,features = VariableFeatures(sobject.sub.fib),npcs = 50, verbose = FALSE)
+ElbowPlot(sobject.sub.fib,ndims = 50, reduction = "pca")
+print(sobject.sub.fib[["pca"]], dims = 1:20, nfeatures = 5)
+```
+
+Once you are satisfied with pc's, run clustering: 
+```{r}
+sobject.sub.fib<-RunUMAP(sobject.sub.fib,reduction = "pca",dims = pcs, verbose = F)
+sobject.sub.fib<-FindNeighbors(sobject.sub.fib,dims=c(1:10),verbose=F)
+sobject.sub.fib<-FindClusters(sobject.sub.fib,verbose=F,resolution = res)
+sobject.sub.fib$seurat_clusters = sobject.sub.fib$SCT_snn_res.0.3
+Idents(sobject.sub.fib) = "seurat_clusters"
+```
+
+Function to print multiple graphs: 
+```{r}
+PrintSeuratGraph = function(namecard = "a",seurat_object = sobject.sub.fib,graphtype = "feature",feature = NULL,group = NULL,split=NULL,cellnames=NULL, label=FALSE, order=FALSE){
+  if (!is.null(cellnames)){
+    #Idents(seurat_object) = cellnames[1]
+    #cells = colnames(seurat_object)[Idents(seurat_object) %in% cellnames[1:length(cellnames)]]} 
+    cells = cellnames}
+  else {cells = cellnames}
+  if (graphtype == "feature"){
+    graph = FeaturePlot(seurat_object,features = feature,split.by = split, cells = cells,cols = c("lightyellow","darkred"), order=order)
+  }
+  if (graphtype == "violin"){
+    graph = VlnPlot(seurat_object,features = feature, pt.size = 0.1, idents = cellnames[2:length(cellnames)],group.by = group, split.by = split)
+  }
+  if (graphtype == "dim"){
+    graph = DimPlot(seurat_object,cells = cells, group.by = group, split.by = split, label = label)
+  }
+  name = paste0(feature,"_",graphtype,namecard,".eps")
+  graph
+  setEPS()
+  postscript(file.path(dir,Plotfolder,name))
+  print(graph)
+  dev.off()
+}
+```
+Save the clustered dataset. Overwrite the existing, subset dataset. 
+```{r,eval = FALSE}
+save(sobject.sub.fib,file = file.path(dir,datafolder,paste0(project,"_",iterationname,".RData")))
+```
+
+Block to print multiple graphs: 
+```{r}
+Plotfolder = "Plots/Fibroblast Subset"
+DefaultAssay(sobject.sub.fib) = "RNA"
+
+name = paste0(project,"_",iterationname)
+groups = c("genotype", "fibtype", "fibtypecluster", "seurat_clusters", "microanatomy")
+#note - added fibtype, fibtypecluster from below
+
+p1 = VlnPlot(sobject.sub.fib, "Cxcl12", group.by = "genotype")
+p1$data$ident <- factor(x = p1$data$ident, levels = c("WT", "cKO_Cxcl12"))
+setEPS()
+postscript(file.path(dir,Plotfolder,paste0(name, "Cxcl12_bygenotype.eps")), width=6)
+p1
+dev.off()
+
+cxcl12_expression <- FetchData(sobject.sub.fib, vars = "Cxcl12") # Extract the gene expression data for Cxcl12
+cxcl12_expression$genotype <- sobject.sub.fib@meta.data$genotype # Combine with metadata to align gene expression with genotype information
+wilcox.test(cxcl12_expression$Cxcl12 ~ cxcl12_expression$genotype, conf.int = TRUE)
+
+p2 = VlnPlot(sobject.sub.fib, "Col1a2", group.by = "genotype")
+p2$data$ident <- factor(x = p2$data$ident, levels = c("WT", "cKO_Cxcl12"))
+setEPS()
+postscript(file.path(dir,Plotfolder,paste0(name, "Col1a2_bygenotype.eps")), width = 6)
+p2
+dev.off()
+
+col1a2_expression <- FetchData(sobject.sub.fib, vars = "Col1a2") # Extract the gene expression data for Cxcl12
+col1a2_expression$genotype <- sobject.sub.fib@meta.data$genotype # Combine with metadata to align gene expression with genotype information
+wilcox.test(col1a2_expression$Col1a2 ~ col1a2_expression$genotype, conf.int = TRUE)
+
+#dim plots for clustering
+for(group in groups){
+  PrintSeuratGraph(namecard = name,graphtype = "dim",group = group, feature = group)
+  PrintSeuratGraph(namecard = paste0(name,"_labeled_"),graphtype = "dim",group = group, feature = group, label = TRUE)
+  PrintSeuratGraph(namecard = paste0(name, "_split_"), graphtype = "dim", feature = group, split=group)
+}
+
+#celltype without legend
+graph = DimPlot(sobject.sub.fib, group.by = "fibtype", label=TRUE) + ggplot2::theme(legend.position = "none")
+setEPS()
+postscript(file.path(dir,Plotfolder,"dimplot_nolegend.eps"))
+print(graph)
+dev.off()
+```
+
+```{r}
+#Edit this part carefully. You can add any number of types. Each cluster can only be one type. 
+
+type0 = c(-1)
+name0 = "Altered_dural_1"
+type1 = c(0)
+name1 = "Late_inner"
+type2 = c(1)
+name2 = "Lymphocyte_interactive"
+type3 = c(2)
+name3 = "Myofibroblast_Cxcl12" #note - annotated as "Myofibroblast_Lymph_interact" in figures
+type4 = c(3)
+name4 = "Arachnoid_1"
+type5 = c(4)
+name5 = "Altered_dural_2"
+type6 = c(5)
+name6 = "Osteoblast_1"
+type7 = c(6)
+name7 = "Arachnoid_2"
+type8 = c(7)
+name8 = "Pial"
+type9 = c(8)
+name9 = "Osteoblast_2"
+
+#Initialize the cluster levels as a vector and replace the cluster levels with the appropriate name. 
+clusters = as.factor(sobject.sub.fib$seurat_clusters)
+type = levels(clusters)
+type[type0+2] = name0
+type[type1+2] = name1
+type[type2+2] = name2
+type[type3+2] = name3
+type[type4+2] = name4
+type[type5+2] = name5
+type[type6+2] = name6
+type[type7+2] = name7
+type[type8+2] = name8
+type[type9+2] = name9
+
+levels(clusters) = type
+
+#Add a metadata column
+sobject.sub.fib$fibtype = clusters
+
+#check the celltype assignment for accuracy
+table(sobject.sub.fib$fibtype,sobject.sub.fib$seurat_clusters)
+
+#add a metadata column labelling each cluster
+sobject.sub.fib$fibtypecluster = paste0(sobject.sub.fib$fibtype,"-",sobject.sub.fib$seurat_clusters)
+Idents(sobject.sub.fib) = "fibtype"
+```
+Save the clustered dataset with fibtype labels. Overwrite the existing, clustered dataset. 
+```{r,eval = FALSE}
+save(sobject.sub.fib,file = file.path(dir,datafolder,paste0(project,"_",iterationname,".RData")))
+```
+
+
+Save the tree
+```{r}
+Idents(sobject.sub.fib) = "seurat_clusters"
+sobject.sub.fib= BuildClusterTree(sobject.sub.fib,dims = pcs)
+tree = sobject.sub.fib@tools$BuildClusterTree
+setEPS()
+postscript(file.path(dir,"Trees",paste0(project,"_",iterationname,"_tree.eps")))
+plot.phylo(tree, use.edge.length = T, direction = "rightwards")
+dev.off()
+```
+
+# Note - not included in paper but used for identity assignment
+```{r}
+Plotfolder = "Plots/Fibroblast Subset/Old Seq Mapping"
+  
+#Map old clusters (NEC127) onto new clusters (NEC292)
+old_markers_path = "/Users/nathanewing-crystal/Ari Molofsky Lab Dropbox/Ari Molofsky Lab Team Folder/Nathan Ewing-Crystal/RNASeq/Lesion snRNASeq/seurat/Spreadsheets/lesion_snRNASeq_fib_reclustered_all_markers.csv"
+old_markers = read.csv(old_markers_path,stringsAsFactors = F)
+
+old_clusters = levels(factor(old_markers$cluster))
+old_cluster_names = c("Meninges_1", "Lama1", "Tmeff2", "Meninges_2", "Ptgds", "Fn1", "Cd80", "Myeloid", "Meninges_3", "Ghr", "Nrxn1-3", "Mural_Pericyte", "Meninges_4", "Prolif", "Meninges_5")
+names(old_clusters) = old_cluster_names
+old_clusters = old_clusters[-c(8,11)]
+old_cluster_names = old_cluster_names[-c(8,11)]
+
+plots = list()
+
+for(i in 1:length(old_clusters)){
+  old_cluster = old_clusters[i]
+  cluster_name = old_cluster_names[i]
+  old_genes = old_markers[old_markers$cluster == old_cluster & old_markers$avg_log2FC > 0,]$gene
+  #convert  into a list with length=1
+  old_genes_list = list()
+  old_genes_list[[1]] = old_genes
+  sobject.sub.fib <- AddModuleScore(
+    sobject.sub.fib,
+    old_genes_list,
+    pool = NULL,
+    nbin = 24,
+    ctrl = 100,
+    name = paste0(cluster_name, "_score"),
+    seed = 1,
+    search = TRUE)
+    
+    feature_name = paste0(cluster_name, "_score1")
+    print(VlnPlot(sobject.sub.fib, feature_name))
+    #PrintSeuratGraph(namecard = name,graphtype = "violin",feature = feature_name,group = "seurat_clusters")
+}
+
+p1 = VlnPlot(sobject.sub.fib, c("Prolif_score1", "Fn1_score1", "Ghr_score1", "Cd80_score1", "Lama1_score1", "Ptgds_score1", "Tmeff2_score1", "Mural_Pericyte_score1", "Meninges_1_score1", "Meninges_2_score1", "Meninges_3_score1",  "Meninges_4_score1", "Meninges_5_score1"), stack=T, group.by = "fibtype")
+p1$data$ident <- factor(x = p1$data$ident, levels = rev(c("Myofibroblast_Cxcl12", "Late_inner", "Lymphocyte_interactive", "Pial", "Arachnoid_1", "Arachnoid_2", "Altered_dural_1", "Altered_dural_2", "Osteoblast_1", "Osteoblast_2")))
+
+p2 = DotPlot(sobject.sub.fib, assay = "RNA", group.by = "fibtype", features = c("Prolif_score1", "Fn1_score1", "Ghr_score1", "Cd80_score1", "Lama1_score1", "Ptgds_score1", "Tmeff2_score1", "Mural_Pericyte_score1", "Meninges_1_score1", "Meninges_2_score1", "Meninges_3_score1",  "Meninges_4_score1", "Meninges_5_score1"), cols = "RdBu", dot.min = 0.999) + theme(axis.text.x = element_text(angle = 90, hjust = 0.95))
+p2$data$id <- factor(x = p2$data$id, levels = rev(c("Myofibroblast_Cxcl12", "Late_inner", "Lymphocyte_interactive", "Pial", "Arachnoid_1", "Arachnoid_2", "Altered_dural_1", "Altered_dural_2", "Osteoblast_1", "Osteoblast_2")))
+
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "fib_mapping_old.eps"), width = 10, height = 5)
+p2
+dev.off()
+
+setEPS()
+postscript(file.path(dir, Plotfolder, "fib_mapping.eps"), width = 10, height = 5)
+p1
+dev.off()
+```
+
+# Note - used for barplots (see 3_BarPlots.Rmd)
+```{r}
+#add Fibroblast metadata to total sobject
+#load(file.choose) #load total sobject
+
+celltype = as.character(sobject$celltype)
+names(celltype) = as.character(colnames(sobject))
+
+celltypecluster = as.character(sobject$celltypecluster)
+names(celltypecluster) = as.character(colnames(sobject))
+
+fibtype = as.character(sobject.sub.fib$fibtype)
+names(fibtype) = as.character(colnames(sobject.sub.fib))
+
+for(cell in names(celltype)){
+  if(cell %in% names(fibtype)){
+      index_cell = which(names(celltype) == cell)
+      index_fib = which(names(fibtype) == cell)
+      celltype[index_cell] = paste0("Fibroblast_", fibtype[index_fib])
+  }
+}
+
+sobject$fibtype = celltype
+
+iterationname = "final"
+
+datafolder = "Data/Seurat"
+save(sobject,file = file.path(dir,datafolder,paste0(project,"_",iterationname,".RData")))
+```
