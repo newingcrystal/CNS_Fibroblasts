@@ -172,7 +172,7 @@ Plotfolder = "Plots/T_cell Subset"
 DefaultAssay(sobject.sub.t) = "RNA"
 name = paste0(project,"_",iterationname)
 
-genes_lineage  = c("Cd4", "Cd8a", "Ifng", "Tbx21", "Rorc", "Il17a")
+genes_lineage  = c("Il17a", "Rorc", "Ifng", "Tbx21", "Cd4", "Cd8a")
 p1 = DotPlot(sobject.sub.t, assay = "RNA", features = genes_lineage, cols = "RdBu") + theme(axis.text.x = element_text(angle = 90, hjust = 0.95)) + coord_flip()
 setEPS()
 postscript(file.path(dir,"DotPlots",paste0(name, "dotplot.eps")), width = 4, height = 4)
