@@ -178,6 +178,13 @@ setEPS()
 postscript(file.path(dir,"DotPlots",paste0(name, "dotplot.eps")), width = 4, height = 4)
 print(p1)
 dev.off()
+
+groups = c("microanatomy")
+
+#dim plots for clustering
+for(group in groups){
+  PrintSeuratGraph(namecard = name,graphtype = "dim",group = group, feature = group)
+}
 ```
 
 ```{r}

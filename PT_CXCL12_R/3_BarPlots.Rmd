@@ -148,7 +148,7 @@ clustercolumn = "ttype"
     tdf = tdf[,c("WT", "cKO_Cxcl12")]
     t = tdf
     
-    clusters_to_keep = c("T_cell_abT", "T_cell_gdT")
+    clusters_to_keep = c("T_cell_abT")
     t = t[clusters_to_keep,]
 
     name = paste0(project, "_", clustercolumn, "_cluster-frequencies_of_total")
@@ -181,7 +181,7 @@ clustercolumn = "ttype"
     tdf = tdf[c("WT", "cKO"),]
     t = tdf
     
-    clusters_to_keep = c("T_cell_abT", "T_cell_gdT")
+    clusters_to_keep = c("T_cell_abT")
     t = t[,clusters_to_keep]
 ```
 

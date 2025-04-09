@@ -34,6 +34,9 @@ library(TxDb.Mmusculus.UCSC.mm10.ensGene)
 library(org.Mm.eg.db)
 #BiocManager::install("clusterProfiler")
 library(clusterProfiler)
+
+install.packages("ggbreak")
+library(ggbreak)
 ```
 
 #Load seurat object
@@ -306,28 +309,16 @@ topIFNgeneslist[[1]] #check if all genes show up
 
 sobject.sub.neuron = AddModuleScore(sobject.sub.neuron,features = topIFNgeneslist, name = "IFNgModuleScore") #adds IFNgModuleScore to your sobject as a new metadata category
 
-##### total #####
-p1 = VlnPlot(sobject.sub.neuron, "IFNgModuleScore1", group.by = "genotype")
-p1$data$ident <- factor(x = p1$data$ident, levels = c("WT", "cKO_Cxcl12"))
-name = paste0(project, iterationname, "_IFNgModuleScore1.eps")
-
-setEPS()
-postscript(file.path(dir,Plotfolder,name), width=6)
-print(p1)
-dev.off()
-
-  #sig
-sobject_metadata = data.frame(sobject.sub.neuron@meta.data) #creates dataframe of metadata in sobject
-wilcox.test(sobject_metadata$IFNgModuleScore1 ~ sobject_metadata$genotype, conf.int = T)
-
 ##### by neurotype (excitatory vs. inhibitory) #####
 p2 = VlnPlot(sobject.sub.neuron, features = "IFNgModuleScore1", group.by = "neurotype_general", split.by = "genotype", split.plot=T)
 p2$data$split <- factor(x = p2$data$split, levels = c("WT", "cKO_Cxcl12"))
 name = paste0(project, iterationname, "_IFNgModuleScore1_split.eps")
 
+p3 = p2 + scale_y_break(breaks = c(0.05,0.05), scales=0.25)
+
 setEPS()
-postscript(file.path(dir,Plotfolder,name), width=6)
-print(p2)
+postscript(file.path(dir,Plotfolder,paste0(name, "_break")), width=6)
+print(p3)
 dev.off()
 
 #sig

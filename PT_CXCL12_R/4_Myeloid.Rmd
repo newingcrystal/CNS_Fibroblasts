@@ -36,6 +36,9 @@ library(org.Mm.eg.db)
 library(clusterProfiler)
 
 library(openxlsx)
+
+#install.packages("ggbreak")
+library(ggbreak)
 ```
 
 #Load immune seurat object
@@ -280,38 +283,22 @@ topIFNgeneslist[[1]] #check if all genes show up
 
 sobject.sub.myeloid = AddModuleScore(sobject.sub.myeloid,features = topIFNgeneslist, name = "IFNgModuleScore") #adds IFNgModuleScore to your sobject as a new metadata category
 
-p3 = VlnPlot(sobject.sub.myeloid, features = "IFNgModuleScore1", group.by = "microanatomy", split.by = "genotype", split.plot=T)
-p3$data$split <- factor(x = p3$data$split, levels = c("WT", "cKO_Cxcl12"))
-name = paste0(project, iterationname, "_IFNgModuleScore1_split_microanatomy.eps")
+### lesional only
+Idents(sobject.sub.myeloid) = "microanatomy"
+p4 = VlnPlot(sobject.sub.myeloid, idents = c("Lesion"), "IFNgModuleScore1", group.by = "genotype")
+p4$data$ident <- factor(x = p4$data$ident, levels = c("WT", "cKO_Cxcl12"))
+name = paste0(project, iterationname, "_IFNgModuleScore1_LESION.eps")
+p5 = p4 + scale_y_break(breaks = c(0.5,0.5), scales=0.25)
 
 setEPS()
-postscript(file.path(dir,Plotfolder,name), width = 6)
-print(p3)
+postscript(file.path(dir,Plotfolder,name), width=6)
+print(p5)
 dev.off()
 
- #sig
-install.packages("coin")
-library(coin)
-
-sobject_metadata.mod = sobject_metadata
-sobject_metadata.mod$genotype = as.factor(sobject_metadata.mod$genotype)
-sobject_metadata.mod$microanatomy = as.factor(sobject_metadata.mod$microanatomy)
-
-# Apply wilcox_test separately for each myeloid type
-results_list <- lapply(split(sobject_metadata.mod, sobject_metadata.mod$microanatomy), function(subset_data) {
-  test <- wilcox_test(IFNgModuleScore1 ~ genotype | microanatomy, data = subset_data)
-  data.frame(
-    Microanatomy = unique(subset_data$microanatomy),
-    Statistic = statistic(test),
-    PValue = pvalue(test)
-  )
-})
-
-# Convert results to a data frame
-results_df <- do.call(rbind, results_list)
-
-# Adjust p-values for multiple comparisons
-results_df$AdjustedPValue <- p.adjust(results_df$PValue, method = "bonferroni")
+#Stats - 
+sub = subset(sobject.sub.myeloid, ident = "Lesion")
+sobject_metadata = data.frame(sub@meta.data) #creates dataframe of metadata in sobject
+wilcox.test(sobject_metadata$IFNgModuleScore1 ~ sobject_metadata$genotype, conf.int=T)
 ```
 
 Save the clustered dataset with immunetype labels. Overwrite the existing, clustered dataset. 
