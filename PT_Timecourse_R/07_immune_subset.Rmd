@@ -448,8 +448,10 @@ postscript(file.path(dir,Plotfolder, paste0(project, iterationname, "mac_timepoi
 DimPlot(sobject.sub.mac.wt, group.by = "timepoint", order = "Rest", cols = c("#F8766D", "#00BFC4", "#DFAF37", "#C77CFF")) #plot rest last (rare)
 dev.off()
 
-Idents(sobject.sub.mac.wt) = "immunetype"
-p1 = VlnPlot(subset(sobject.sub.mac.wt, subset = timepoint == c("7dpi", "21dpi")), features = "fab5_score1", idents = c("DAMs", "Macrophage_Ldlrad3"), split.by = "timepoint", split.plot=T)
+Idents(sobject.sub.mac.wt) = "timepoint"
+timesub = subset(sobject.sub.mac.wt, idents = c("7dpi", "21dpi"))
+Idents(timesub) = "immunetype"
+p1 = VlnPlot(timesub, features = "fab5_score1", idents = c("DAMs", "Macrophage_Ldlrad3"), split.by = "timepoint", split.plot=T)
 p1$data$split <- factor(x = p1$data$split, levels = c("7dpi", "21dpi"))
 
 #sig
