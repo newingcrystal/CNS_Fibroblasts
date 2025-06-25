@@ -325,6 +325,7 @@ dev.off()
 install.packages("coin")
 library(coin)
 
+sobject_metadata = data.frame(sobject.sub.neuron@meta.data) #creates dataframe of metadata in sobject
 sobject_metadata.mod = sobject_metadata
 sobject_metadata.mod$genotype = as.factor(sobject_metadata.mod$genotype)
 sobject_metadata.mod$neurotype_general = as.factor(sobject_metadata.mod$neurotype_general)
@@ -343,7 +344,14 @@ results_list <- lapply(split(sobject_metadata.mod, sobject_metadata.mod$neurotyp
 results_df <- do.call(rbind, results_list)
 
 # Adjust p-values for multiple comparisons
-results_df$AdjustedPValue <- p.adjust(results_df$PValue, method = "fdr")
+results_df$AdjustedPValue <- p.adjust(results_df$PValue, method = "bonferroni")
+
+#workaround for printing digits
+raw_p <- 2.220446e-16
+n_tests <- 2
+bonf <- min(1, raw_p * n_tests)
+sprintf("%.22e", bonf)
+# "1.1102230000000000000000e-11"
 ```
 
 ***~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~***
