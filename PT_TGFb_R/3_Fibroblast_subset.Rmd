@@ -514,6 +514,35 @@ datafolder = "Data/Seurat"
 save(sobject,file = file.path(dir,datafolder,paste0(project,"_",iterationname,".RData")))
 ```
 
+***~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~***
+TGFb: compare Col1a2 cKO or ADWA11 vs. WT fibroblasts for
+-all fibroblast clusters together
+-each fibroblast cluster individually
+***~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~***
+```{r}
+Plotfolder = "Plots/Fibroblast Subset/Volcano"
+groups = c("NULL", "0", "2", "4", "5", "6", "8", "9")
+clusters = levels(as.factor(sobject.sub.fib$fibtypecluster))
+#manual assignment
+group_names=c("all", clusters[1], clusters[6], clusters[4], clusters[2], clusters[7], clusters[5], clusters[8], clusters[3])
+Idents(sobject.sub.fib) = "seurat_clusters"
+
+#WT vs. cKO
+for(group in groups){
+  group_name = group_names[which(groups == group)]
+  print(paste0("Finding markers (WT vs. cKO) for: ", group_name))
+
+  markers = FindMarkers(
+    sobject.sub.fib,
+    group.by = "condition",
+    ident.1 = "cKO",
+    ident.2 = "WT",
+    subset.ident = if(group_name == "all"){NULL} else{group}) #either cluster of interest or all clusters together
+  
+  write.csv(markers,file = file.path(dir,"Spreadsheets/WT_vs_cKO",paste0(project, "_", iterationname, "_cluster-", group_name, "_wt-vs-col1a2-cKO_markers.csv")))
+}
+```
+
 ***GENE SET TESTING**
 https://sbc.shef.ac.uk/prostate-bioinformatics/rna-seq-gene-set-testing.nb.html
 
