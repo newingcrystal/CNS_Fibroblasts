@@ -536,8 +536,6 @@ require(biomaRt)
 
 features_tgfb_filter = read.csv("/Users/nathanewing-crystal/Ari Molofsky Lab Dropbox/Ari Molofsky Lab Team Folder/Nathan Ewing-Crystal/RNASeq/Visium/Seurat/Data/Other/tgfb-vs-pbs.csv")
 
-features_tgfb_filter = features_tgfb_filter$Cs
-
 ### If you are using a mouse data, then its needed to convert the gene names to human orthologs
 
 human = useMart("ensembl", dataset = "hsapiens_gene_ensembl", host = "dec2021.archive.ensembl.org")
