@@ -1,5 +1,5 @@
 # CNS_Fibroblasts
-Code used for RNAseq analysis in "Dynamic fibroblast-immune interactions shape wound healing after brain injury," Ewing-Crystal et al.
+Code used for RNAseq analysis in "Dynamic fibroblast-immune interactions shape recovery after brain injury," Ewing-Crystal et al.
 
 -------------------------------------------------
 See corresponding folder for R markdown file containing code to analyze indicated dataset, including:
